@@ -24,10 +24,28 @@ jobs:
           # letzten Tag zu lesen — ein flacher Checkout zeigt nur den letzten.
           fetch-depth: 0
 
+      # NODE 24 UND NICHT 22 -- ANDERS ALS IN DEN DREI SCHWESTERPROJEKTEN.
+      #
+      # Der erste Lauf dieses Workflows (25.09.2026) schlug nach 15 Sekunden
+      # an `npm ci` fehl: "Missing: unplugin@3.4.0 from lock file". Die
+      # Lock-Datei war nicht kaputt -- sie war mit npm 11 geschrieben (Node 26
+      # auf dem Arbeitsrechner), und npm 10, das mit Node 22 kommt, liest
+      # eine Dedup-Entscheidung darin anders und haelt sie fuer unvollstaendig.
+      #
+      # Der naheliegende Weg -- die Lock-Datei mit npm 10 neu erzeugen --
+      # verschob 15 Pakete, mehrere davon RUECKWAERTS (undici 8.11.2 auf
+      # 6.29.0, string-width 8.3.0 auf 4.2.3). Eine Freigabe, die dabei
+      # stillschweigend aeltere Abhaengigkeiten einzieht, ist der schlechtere
+      # Tausch.
+      #
+      # Node 24 bringt npm 11 und liest die Datei so, wie sie geschrieben
+      # wurde. Die drei Schwesterprojekte stehen weiter auf 22, weil es dort
+      # laeuft -- dieselbe Falle wartet dort aber, sobald jemand ihre
+      # Lock-Datei mit npm 11 anfasst.
       - name: Node einrichten
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
 
       - name: Abhängigkeiten installieren
         run: npm ci
