@@ -50,10 +50,27 @@ const route = useRoute()
 /** Kam der Aufruf über „Switch event"? Dann nicht wieder wegspringen. */
 const wechselwunsch = computed(() => route.query.switch !== undefined)
 
+/*
+ * Der Seitenschluessel aus der Adresse -- fuer den Lesezeichen-Link eines
+ * Veranstalters. `/board?site=EPBF` zeigt nur dessen Veranstaltungen.
+ *
+ * Ohne ihn bleibt alles, wie es war: dann gilt BB_SITE der Installation.
+ * Fuer eine Instanz mit einer Veranstaltung aendert sich also nichts; die
+ * Mietplattform braucht ihn, weil dort dreissig Turniere parallel laufen
+ * koennen und niemand seines darunter suchen will.
+ *
+ * Er steckt im Schluessel von useAsyncData, weil sonst die erste geladene
+ * Liste fuer alle weiteren gaelte -- wer den Link oeffnet, saehe die
+ * ungefilterte Liste aus dem Zwischenspeicher.
+ */
+const seite = computed(() => String(route.query.site ?? '').trim())
+
 const { data, refresh } = await useAsyncData(
-  'board-events',
-  () => $fetch<BoardEventList>('/api/board/events'),
-  { default: () => ({ events: [], next: null }) as BoardEventList },
+  () => `board-events:${seite.value || '*'}`,
+  () => $fetch<BoardEventList>('/api/board/events', {
+    query: seite.value ? { site: seite.value } : undefined,
+  }),
+  { default: () => ({ events: [], next: null }) as BoardEventList, watch: [seite] },
 )
 
 const events = computed(() => data.value?.events ?? [])

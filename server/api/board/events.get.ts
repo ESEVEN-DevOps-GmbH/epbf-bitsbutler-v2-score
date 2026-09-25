@@ -161,10 +161,34 @@ const sammeln = defineCachedFunction(
   },
 )
 
-export default defineEventHandler(async (): Promise<BoardEventList> => {
+export default defineEventHandler(async (event): Promise<BoardEventList> => {
   const config = useRuntimeConfig()
   const basis = String(process.env.BB_API ?? '')
-  const seite = String(process.env.BB_SITE ?? '')
+
+  /*
+   * DER SEITENSCHLUESSEL DARF AUS DER ANFRAGE KOMMEN -- seit dem
+   * 25.09.2026.
+   *
+   * Er stand nur in BB_SITE, einer Angabe je Installation. Fuer eine
+   * Instanz mit EINER Veranstaltung stimmt das; fuer die Mietplattform
+   * nicht. Der Auftraggeber: "wenn das wirklich als plattform angeboten
+   * wird und dann 30, 50 oder mehr events parallel laufen, wie lange dann
+   * die 'pick a event' liste wird". Wer in einer lauten Halle mit klammen
+   * Fingern seinen Turniernamen unter dreissig fremden sucht, hat ein
+   * Problem, das keine Sortierung loest.
+   *
+   * ?site=EPBF macht daraus einen Link, den ein Veranstalter sich als
+   * Lesezeichen legt. Die Vorgabe bleibt BB_SITE, damit sich fuer die
+   * EPBF-Instanz nichts aendert.
+   *
+   * KEINE WACHE, SONDERN EINE ABKUERZUNG. Der Schluessel geht als
+   * X-BB-Site an die Anwendung, und DORT entscheiden die Zeilenrechte,
+   * was sichtbar ist -- er kann also nichts oeffnen, was ohne ihn
+   * verschlossen waere. Wer ihn raet, sieht dieselbe Liste wie jeder
+   * andere auch. Die Wache bleibt der Tafelcode.
+   */
+  const ausDerAnfrage = String(getQuery(event).site ?? '').trim()
+  const seite = ausDerAnfrage || String(process.env.BB_SITE ?? '')
 
   /*
    * Die Bau-Kennung dieses Servers — siehe
