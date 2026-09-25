@@ -191,7 +191,7 @@ interface GespeichertesEnde {
    */
   rumpf?: {
     winner: Seite, scoreA: number, scoreB: number
-    resolution: 'WALKOVER' | 'FORFEIT', boardPin?: string
+    resolution: 'WALKOVER' | 'FORFEIT'
   }
   /**
    * Der Stand, auf dem `rumpf.scoreA`/`scoreB` beruhen — wie `basis` bei
@@ -2278,7 +2278,7 @@ export function useZaehlwerk(optionen: {
       laeuft.value = false
     }
     catch (roh: unknown) {
-      if (istNetzfehler(roh)) {
+      if (istNetzfehler(roh) && eintrag.gespeichert) {
         // Erst HIER abgelegt und nicht schon in `beendenSchreiben`: ein
         // Ende, das beim ersten Versuch sofort durchgeht (der häufigste
         // Fall, solange das Netz steht), soll gar nicht erst in
@@ -2321,7 +2321,17 @@ export function useZaehlwerk(optionen: {
   async function beendenSchreiben(
     matchId: string,
     was: () => Promise<{ advanced: number, newlySettled: number }>,
-    gespeichert: GespeichertesEnde,
+    /**
+     * Was bei einem Netzfehler gemerkt wird -- oder `undefined`, wenn
+     * dieser Vorgang NICHT nachgeholt werden darf.
+     *
+     * Das ist der Fall bei einem kampflosen Ende mit Personencode: ihn zu
+     * merken hiesse, ihn zu speichern, und ein Code, der eine
+     * Disqualifikation deckt, gehoert nicht in den `localStorage` eines
+     * Tablets, das in einer Halle herumliegt. Siehe die Begruendung bei
+     * `aufgeben`.
+     */
+    gespeichert?: GespeichertesEnde,
   ) {
     if (laeuft.value) return
     laeuft.value = true
@@ -2471,6 +2481,30 @@ export function useZaehlwerk(optionen: {
       ...(code === '' ? {} : { boardPin: code }),
     }
 
+    /*
+     * EIN KAMPFLOSES ENDE WIRD NICHT GEMERKT, WENN EIN PERSONENCODE DARAN
+     * HÄNGT — korrigiert am 25.09.2026, noch am Tag des Einbaus.
+     *
+     * Ein gemerkter Vorgang muss beim Wiederholen alles mitbringen, was er
+     * beim ersten Mal hatte. Für `boardPin` hiesse das: der Personencode
+     * liegt für die Dauer des Netzausfalls im `localStorage` eines
+     * Tablets, das in einer Halle auf einem Tisch liegt und das jeder
+     * anfassen kann. Ein Code, der eine Disqualifikation deckt, gehört
+     * nicht in einen Speicher, den die Entwicklerwerkzeuge jedes Browsers
+     * in zwei Klicks zeigen.
+     *
+     * Der Auftraggeber hat die Grenze selbst gezogen: „schiri eingriffe
+     * und so, können 'nicht verfügbar' sein". Ein Walkover und ein
+     * Forfeit sind genau das — sie verlangen einen Ausweis, und wer
+     * keinen vorzeigen kann, weil die Leitung weg ist, wartet. Was
+     * weiterlaufen muss, sind die PUNKTE, und die brauchen keinen Code.
+     *
+     * OHNE Personencode (der Regelfall am Tisch: das Gerät handelt unter
+     * einer Freigabe, die für diese Art Meldung reicht) wird das Ende
+     * gemerkt wie jedes andere.
+     */
+    const mitAusweis = code !== ''
+
     await beendenSchreiben(
       m.id,
       () => $fetch<{ advanced: number, newlySettled: number }>(
@@ -2484,7 +2518,9 @@ export function useZaehlwerk(optionen: {
        * (siehe oben), unabhängig vom tatsächlichen Stand, und ein Abgleich
        * dagegen wäre keiner. Siehe `ergebnisWiederherstellen`.
        */
-      { art: 'ende', pfad: 'result', rumpf, basis: walkover ? null : { ...punkte } },
+      mitAusweis
+        ? undefined
+        : { art: 'ende', pfad: 'result', rumpf, basis: walkover ? null : { ...punkte } },
     )
   }
 
