@@ -43,7 +43,7 @@
  * der Schiedsrichter meldet den Vorfall, ausgeschlossen wird von der
  * Turnierleitung.
  */
-const ARTEN = ['WALKOVER', 'FORFEIT']
+const RESOLUTION_KINDS = ['WALKOVER', 'FORFEIT']
 
 export default defineEventHandler(async (event) => {
   const id = parseId(getRouterParam(event, 'id'), 'Partiekennung')
@@ -51,8 +51,8 @@ export default defineEventHandler(async (event) => {
     winner?: string, scoreA?: number, scoreB?: number, resolution?: string, boardPin?: string
   }>(event)
 
-  const sieger = String(body?.winner ?? '').trim().toUpperCase()
-  if (sieger !== 'A' && sieger !== 'B') {
+  const winner = String(body?.winner ?? '').trim().toUpperCase()
+  if (winner !== 'A' && winner !== 'B') {
     throw createError({ statusCode: 400, statusMessage: 'Kein Sieger' })
   }
 
@@ -62,8 +62,8 @@ export default defineEventHandler(async (event) => {
    * eine Zählleiste, die nichts mitschickt, bekäme "Keine Art des Endes"
    * statt eines Hinweises auf `confirm`. Sie muss die Art jetzt nennen.
    */
-  const art = String(body?.resolution ?? '').trim().toUpperCase()
-  if (!ARTEN.includes(art)) {
+  const resolution = String(body?.resolution ?? '').trim().toUpperCase()
+  if (!RESOLUTION_KINDS.includes(resolution)) {
     throw createError({
       statusCode: 400,
       statusMessage: 'Rejected',
@@ -92,13 +92,13 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  return await anDieVerwaltung(event, `/matches/${id}/result`, {
+  return await toAdmin(event, `/matches/${id}/result`, {
     method: 'POST',
     body: {
-      winner: sieger,
+      winner,
       scoreA: a,
       scoreB: b,
-      resolution: art,
+      resolution,
       ...(code === '' ? {} : { boardPin: code }),
     },
   })

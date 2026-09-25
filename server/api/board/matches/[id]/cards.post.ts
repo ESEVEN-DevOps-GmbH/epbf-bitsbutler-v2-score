@@ -9,7 +9,7 @@
  * `result.post.ts` die Disqualifikation nicht durchlässt.
  *
  * Das ist die DRITTE von drei Stellen, und keine davon ist überflüssig:
- * `Schirimenue.vue` bietet bei SCHWARZ gar keinen Knopf an, diese Liste
+ * `RefereeMenu.vue` bietet bei SCHWARZ gar keinen Knopf an, diese Liste
  * weist die Farbe ab, und `competition.issue_card` fragt am Ende selbst nach
  * `disqualification/X`. Die erste Stelle ist Höflichkeit, die zweite spart
  * einen Weg zur Verwaltung, und nur die dritte ist die Sicherung — eine
@@ -23,7 +23,7 @@
  * ausgewiesen); ein Gerät ohne Code bekommt aus der Verwaltung
  * BOARD_PIN_REQUIRED zurück, und das Menü fragt dann nach den sechs Ziffern.
  */
-const FARBEN = ['GREEN', 'YELLOW', 'RED']
+const CARD_COLORS = ['GREEN', 'YELLOW', 'RED']
 
 export default defineEventHandler(async (event) => {
   const id = parseId(getRouterParam(event, 'id'), 'Partiekennung')
@@ -31,13 +31,13 @@ export default defineEventHandler(async (event) => {
     playerId?: string, card?: string, reasonCode?: string, note?: string, boardPin?: string
   }>(event)
 
-  const spieler = String(body?.playerId ?? '').trim()
-  if (!/^[0-9a-f-]{36}$/i.test(spieler)) {
+  const player = String(body?.playerId ?? '').trim()
+  if (!/^[0-9a-f-]{36}$/i.test(player)) {
     throw createError({ statusCode: 400, statusMessage: 'Keine Spielerkennung' })
   }
 
-  const farbe = String(body?.card ?? '').trim().toUpperCase()
-  if (!FARBEN.includes(farbe)) {
+  const color = String(body?.card ?? '').trim().toUpperCase()
+  if (!CARD_COLORS.includes(color)) {
     throw createError({
       statusCode: 400,
       statusMessage: 'Rejected',
@@ -60,16 +60,16 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const anlass = String(body?.reasonCode ?? '').trim()
-  const notiz = String(body?.note ?? '').trim()
+  const reason = String(body?.reasonCode ?? '').trim()
+  const note = String(body?.note ?? '').trim()
 
-  return await anDieVerwaltung(event, `/matches/${id}/cards`, {
+  return await toAdmin(event, `/matches/${id}/cards`, {
     method: 'POST',
     body: {
-      playerId: spieler,
-      card: farbe,
-      ...(anlass === '' ? {} : { reasonCode: anlass.slice(0, 64) }),
-      ...(notiz === '' ? {} : { note: notiz.slice(0, 500) }),
+      playerId: player,
+      card: color,
+      ...(reason === '' ? {} : { reasonCode: reason.slice(0, 64) }),
+      ...(note === '' ? {} : { note: note.slice(0, 500) }),
       ...(code === '' ? {} : { boardPin: code }),
     },
   })

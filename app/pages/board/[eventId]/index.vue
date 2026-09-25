@@ -55,40 +55,40 @@ const { data } = await useAsyncData(
   async () => {
     try {
       return {
-        tische: await $fetch<BoardTables>(`/api/events/${encodeURIComponent(eventId)}/tables`),
-        unbekannt: false,
+        tables: await $fetch<BoardTables>(`/api/events/${encodeURIComponent(eventId)}/tables`),
+        unknownEvent: false,
       }
     }
-    catch (fehler: unknown) {
-      return { tische: null, unbekannt: (fehler as { statusCode?: number }).statusCode === 404 }
+    catch (error: unknown) {
+      return { tables: null, unknownEvent: (error as { statusCode?: number }).statusCode === 404 }
     }
   },
 )
 
-const tafel = computed(() => data.value?.tische ?? null)
-const unbekannt = computed(() => data.value?.unbekannt ?? false)
-const tische = computed(() => tafel.value?.tables ?? [])
+const board = computed(() => data.value?.tables ?? null)
+const unknownEvent = computed(() => data.value?.unknownEvent ?? false)
+const tables = computed(() => board.value?.tables ?? [])
 
 /**
  * KEINE FRISCHE ANTWORT — WEDER BESTÄTIGT NOCH WIDERLEGT.
  *
- * `tafel.value` ist `null` in ZWEI Fällen: die Veranstaltung gibt es
- * wirklich nicht (`unbekannt`, ein 404 — eine ECHTE Antwort), oder der
+ * `board.value` ist `null` in ZWEI Fällen: die Veranstaltung gibt es
+ * wirklich nicht (`unknownEvent`, ein 404 — eine ECHTE Antwort), oder der
  * Abruf ist am Netz gescheitert (siehe `catch` oben, kein 404). Nur der
  * zweite Fall ist ein Netzfehler und keine Auskunft; er kommt seit dem
  * Service Worker (sw.ts) auch bei einem Neuladen OHNE Netz vor — vorher
  * lud diese Seite ohne Netz gar nicht erst, also konnte dieser Zweig nie
  * mit leeren Händen laufen.
  */
-const keineAuskunft = computed(() => tafel.value === null && !unbekannt.value)
+const noAnswer = computed(() => board.value === null && !unknownEvent.value)
 
 /** Der Schlüssel trägt die Veranstaltung: ein Schirm überlebt das Turnier. */
-const merkschluessel = `bb.board.table.${eventId}`
+const storageKey = `bb.board.table.${eventId}`
 
-function gemerkt(): number | null {
+function remembered(): number | null {
   if (import.meta.server) return null
-  const roh = window.localStorage.getItem(merkschluessel)
-  const n = roh === null ? Number.NaN : Number.parseInt(roh, 10)
+  const raw = window.localStorage.getItem(storageKey)
+  const n = raw === null ? Number.NaN : Number.parseInt(raw, 10)
   return Number.isFinite(n) && n > 0 ? n : null
 }
 
@@ -130,11 +130,11 @@ function gemerkt(): number | null {
  * keine Antwort, in der die Bau-Kennung mitfahren könnte. Deshalb fragt sie
  * selbst, einmal in der Minute, nach der winzigen Datei, die Nuxt dafür
  * ohnehin schreibt. Warum das für die Tafel am Tisch NICHT der Weg ist,
- * steht in useFassungswechsel.ts.
+ * steht in useVersionSwitch.ts.
  */
-useFassungswechsel({ darf: () => true, selbstFragenMs: 60_000 })
+useVersionSwitch({ allowed: () => true, selfPollMs: 60_000 })
 
-const letzterSchluessel = 'bb.board.table.last'
+const lastStorageKey = 'bb.board.table.last'
 
 /**
  * WIE LANGE DIE ERINNERUNG GILT — VIERZEHN TAGE.
@@ -151,11 +151,11 @@ const letzterSchluessel = 'bb.board.table.last'
  * ist die Frist da, und deshalb ist sie in TAGEN gerechnet und nicht in
  * Monaten.
  */
-const GEDAECHTNIS_MS = 14 * 24 * 60 * 60 * 1000
+const MEMORY_MS = 14 * 24 * 60 * 60 * 1000
 
-function letztenMerken(nummer: number) {
+function rememberLast(number: number) {
   try {
-    window.localStorage.setItem(letzterSchluessel, JSON.stringify({ n: nummer, t: Date.now() }))
+    window.localStorage.setItem(lastStorageKey, JSON.stringify({ n: number, t: Date.now() }))
   }
   catch {
     // Wie oben: ein Gerät im privaten Modus verweigert den Speicher, und die
@@ -172,16 +172,16 @@ function letztenMerken(nummer: number) {
  * nicht vorhanden; eine Ausnahme, die den Aufbau der Seite abbricht, wäre
  * für eine Bequemlichkeit ein zu hoher Preis.
  */
-function letzterTisch(): number | null {
+function lastTable(): number | null {
   if (import.meta.server) return null
   try {
-    const roh = window.localStorage.getItem(letzterSchluessel)
-    if (!roh) return null
-    const o = JSON.parse(roh) as { n?: unknown, t?: unknown }
+    const raw = window.localStorage.getItem(lastStorageKey)
+    if (!raw) return null
+    const o = JSON.parse(raw) as { n?: unknown, t?: unknown }
     const n = Number(o.n)
     const t = Number(o.t)
     if (!Number.isFinite(n) || n <= 0) return null
-    if (!Number.isFinite(t) || Date.now() - t > GEDAECHTNIS_MS) return null
+    if (!Number.isFinite(t) || Date.now() - t > MEMORY_MS) return null
     return n
   }
   catch {
@@ -197,11 +197,11 @@ function letzterTisch(): number | null {
  * wegtippt. Ein Vorschlag, der wiederkäme, während der Finger über den
  * Kacheln steht, wäre eine Fläche, die unter der Hand wandert.
  */
-const vorschlag = ref<number | null>(null)
+const suggestion = ref<number | null>(null)
 
-function vorschlagNehmen() {
-  const n = vorschlag.value
-  if (n !== null) waehlen(n)
+function acceptSuggestion() {
+  const n = suggestion.value
+  if (n !== null) choose(n)
 }
 
 /**
@@ -211,8 +211,8 @@ function vorschlagNehmen() {
  * wegtippt, sagt etwas über diesen Aufruf und nicht über das Gerät. Beim
  * nächsten Mal steht er wieder da, bis wirklich ein Tisch gewählt ist.
  */
-function vorschlagWeg() {
-  vorschlag.value = null
+function dismissSuggestion() {
+  suggestion.value = null
 }
 
 /**
@@ -232,22 +232,22 @@ function vorschlagWeg() {
  * die Seite nicht da ist -- ein Fehlgriff, der eine Minute kostet, ist
  * schlimmer als ein zweiter Aufruf.
  */
-const oeffnet = ref<number | null>(null)
+const opening = ref<number | null>(null)
 
-async function waehlen(nummer: number) {
+async function choose(number: number) {
   // Derselbe Tisch zweimal: der zweite Druck ist die Ungeduld, nicht die
   // Absicht. Ein anderer Tisch geht durch -- siehe oben.
-  if (oeffnet.value === nummer) return
-  oeffnet.value = nummer
+  if (opening.value === number) return
+  opening.value = number
 
   // Der Vorschlag hat sich erledigt, sobald gewählt ist — auch dann, wenn
   // ein ANDERER Tisch gewählt wurde. Sonst stünde das Band noch da, während
   // die Kachel daneben schon lädt.
-  vorschlag.value = null
-  letztenMerken(nummer)
+  suggestion.value = null
+  rememberLast(number)
 
   try {
-    window.localStorage.setItem(merkschluessel, String(nummer))
+    window.localStorage.setItem(storageKey, String(number))
   }
   catch {
     /*
@@ -272,14 +272,14 @@ async function waehlen(nummer: number) {
    * gezählt werden kann, sagt die Tafel selbst — sie fragt beim ersten
    * Abruf nach und zeigt ohne Freigabe eben keine Bedienflächen.
    */
-  if (freigabe.value?.released) {
+  if (grant.value?.released) {
     await $fetch('/api/board/grant/table', {
       method: 'PUT',
-      body: { tableNumber: nummer },
+      body: { tableNumber: number },
     }).catch(() => undefined)
   }
 
-  navigateTo(`/board/${eventId}/${nummer}`)
+  navigateTo(`/board/${eventId}/${number}`)
 }
 
 /**
@@ -288,33 +288,33 @@ async function waehlen(nummer: number) {
  * Sie beginnt beim ersten Tisch und nicht bei keinem: eine Fernbedienung mit
  * OK soll etwas treffen, ohne vorher zu wandern.
  */
-const stelle = ref(0)
-const spalten = ref(4)
+const index = ref(0)
+const columns = ref(4)
 
 /** Was gerade an Ziffern eingetippt ist. Leer heißt: nichts. */
-const getippt = ref('')
-let ziffernUhr: ReturnType<typeof setTimeout> | null = null
+const typed = ref('')
+let digitsTimer: ReturnType<typeof setTimeout> | null = null
 
-function ziffer(z: string) {
-  getippt.value = (getippt.value + z).slice(-3)
-  const treffer = tische.value.findIndex(t => t.number === Number.parseInt(getippt.value, 10))
-  if (treffer >= 0) stelle.value = treffer
+function digit(z: string) {
+  typed.value = (typed.value + z).slice(-3)
+  const foundIndex = tables.value.findIndex(t => t.number === Number.parseInt(typed.value, 10))
+  if (foundIndex >= 0) index.value = foundIndex
 
-  if (ziffernUhr) clearTimeout(ziffernUhr)
+  if (digitsTimer) clearTimeout(digitsTimer)
   // Zwei Sekunden: lang genug für zwei Ziffern mit einer Fernbedienung, kurz
   // genug, dass die alte Eingabe nicht in die nächste hineinragt.
-  ziffernUhr = setTimeout(() => (getippt.value = ''), 2000)
+  digitsTimer = setTimeout(() => (typed.value = ''), 2000)
 }
 
-function bewegen(d: number) {
-  const n = tische.value.length
+function move(d: number) {
+  const n = tables.value.length
   if (n === 0) return
   // Ringförmig: am rechten Rand geht es links weiter. Ein Steuerkreuz, das
   // am Rand nichts tut, sieht aus wie eine Fernbedienung mit leerer Batterie.
-  stelle.value = (stelle.value + d + n) % n
+  index.value = (index.value + d + n) % n
 }
 
-function taste(ev: KeyboardEvent) {
+function onKey(ev: KeyboardEvent) {
   /*
    * Nicht, während jemand tippt. Der Grund stand hier am Anmeldeformular
    * (jede Ziffer eines Kennworts landete in der Tischwahl und wurde mit
@@ -322,10 +322,10 @@ function taste(ev: KeyboardEvent) {
    * das Feld für den Tafelcode besteht aus nichts als Ziffern, und ohne
    * diese Zeile käme keine einzige davon an.
    */
-  const ziel = ev.target as HTMLElement | null
-  if (ziel && /^(input|textarea|select)$/i.test(ziel.tagName)) return
+  const target = ev.target as HTMLElement | null
+  if (target && /^(input|textarea|select)$/i.test(target.tagName)) return
 
-  if (tische.value.length === 0) return
+  if (tables.value.length === 0) return
 
   /*
    * DIE NULL FÜHRT ZURÜCK ZUR VERANSTALTUNGSWAHL — aber nur allein.
@@ -336,35 +336,35 @@ function taste(ev: KeyboardEvent) {
    * Pfeiltasten steuern die Tischkacheln, der Knopf oben ist mit ihnen nicht
    * zu erreichen.
    *
-   * `getippt` muss leer sein. Wer „10" eingibt, tippt erst die Eins und dann
+   * `typed` muss leer sein. Wer „10" eingibt, tippt erst die Eins und dann
    * die Null — eine Null, die mitten in einer Eingabe die Seite wechselte,
    * machte jeden zweistelligen Tisch unerreichbar.
    */
-  if (ev.key === '0' && getippt.value === '') {
+  if (ev.key === '0' && typed.value === '') {
     navigateTo('/board?switch=1')
     ev.preventDefault()
     return
   }
 
   if (ev.key >= '0' && ev.key <= '9') {
-    ziffer(ev.key)
+    digit(ev.key)
     ev.preventDefault()
     return
   }
 
-  const schritt: Record<string, number> = {
+  const step: Record<string, number> = {
     ArrowRight: 1, ArrowLeft: -1,
-    ArrowDown: spalten.value, ArrowUp: -spalten.value,
+    ArrowDown: columns.value, ArrowUp: -columns.value,
   }
-  if (ev.key in schritt) {
-    bewegen(schritt[ev.key]!)
+  if (ev.key in step) {
+    move(step[ev.key]!)
     ev.preventDefault()
     return
   }
 
   if (ev.key === 'Enter' || ev.key === ' ') {
-    const t = tische.value[stelle.value]
-    if (t) waehlen(t.number)
+    const t = tables.value[index.value]
+    if (t) choose(t.number)
     ev.preventDefault()
   }
 }
@@ -381,17 +381,17 @@ function taste(ev: KeyboardEvent) {
  * immer eine Tafel zu einer Nummer, die gelöscht wurde.
  */
 onMounted(() => {
-  const merk = gemerkt()
-  if (merk !== null && (keineAuskunft.value || tische.value.some(t => t.number === merk))) {
-    // Ohne Netz (`keineAuskunft`) ist dieser Sprung ein VERTRAUENSVORSCHUSS
-    // — siehe die Begründung an `keineAuskunft` oben und dieselbe
+  const savedId = remembered()
+  if (savedId !== null && (noAnswer.value || tables.value.some(t => t.number === savedId))) {
+    // Ohne Netz (`noAnswer`) ist dieser Sprung ein VERTRAUENSVORSCHUSS
+    // — siehe die Begründung an `noAnswer` oben und dieselbe
     // Unterscheidung auf board/index.vue. Die Tafel selbst weiss, wie sie
     // sich ohne Antwort verhält (siehe [table].vue, `tafelGelesen`).
-    navigateTo(`/board/${eventId}/${merk}`, { replace: true })
+    navigateTo(`/board/${eventId}/${savedId}`, { replace: true })
     return
   }
 
-  if (merk !== null && !keineAuskunft.value) {
+  if (savedId !== null && !noAnswer.value) {
     /*
      * DIESES GERÄT HATTE IN DIESER VERANSTALTUNG SCHON EINEN TISCH — UND
      * ER IST WEG. Dann wird NICHT vorgeschlagen.
@@ -401,12 +401,12 @@ onMounted(() => {
      * schlechtere von zwei Vorschlägen — und zwar sichtbar: wer hier
      * steht, hat gerade erlebt, dass eine Tischnummer verschwunden ist.
      *
-     * NUR MIT EINER ECHTEN ANTWORT (`!keineAuskunft`): ein Netzfehler ist
+     * NUR MIT EINER ECHTEN ANTWORT (`!noAnswer`): ein Netzfehler ist
      * kein Beleg dafür, dass der Tisch verschwunden ist, siehe oben.
      */
-    window.localStorage.removeItem(merkschluessel)
+    window.localStorage.removeItem(storageKey)
   }
-  else if (merk === null) {
+  else if (savedId === null) {
     /*
      * DER VORSCHLAG — UND ER MUSS INS ZIEL FÜHREN.
      *
@@ -415,11 +415,11 @@ onMounted(() => {
      * nicht; ein Vorschlag, der ins Leere führt, ist schlimmer als keiner,
      * weil er aus einer Auswahl eine Fehlbedienung macht.
      */
-    const letzter = letzterTisch()
-    if (letzter !== null) {
-      const stelleImRaster = tische.value.findIndex(t => t.number === letzter)
-      if (stelleImRaster >= 0) {
-        vorschlag.value = letzter
+    const lastNumber = lastTable()
+    if (lastNumber !== null) {
+      const gridIndex = tables.value.findIndex(t => t.number === lastNumber)
+      if (gridIndex >= 0) {
+        suggestion.value = lastNumber
         /*
          * UND DIE HERVORHEBUNG WANDERT MIT. Sie steht ohnehin immer auf
          * irgendeiner Kachel (beim ersten Tisch, damit eine Fernbedienung
@@ -428,20 +428,20 @@ onMounted(() => {
          * und OK begehbar ist. Sie ist eine VORWAHL und keine Wahl; das
          * war sie vorher auch, und das Band darüber sagt es in Worten.
          */
-        stelle.value = stelleImRaster
+        index.value = gridIndex
       }
     }
   }
 
-  window.addEventListener('keydown', taste)
-  messenUndSetzen()
-  window.addEventListener('resize', messenUndSetzen)
+  window.addEventListener('keydown', onKey)
+  measureAndSet()
+  window.addEventListener('resize', measureAndSet)
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', taste)
-  window.removeEventListener('resize', messenUndSetzen)
-  if (ziffernUhr) clearTimeout(ziffernUhr)
+  window.removeEventListener('keydown', onKey)
+  window.removeEventListener('resize', measureAndSet)
+  if (digitsTimer) clearTimeout(digitsTimer)
 })
 
 /**
@@ -455,14 +455,14 @@ onBeforeUnmount(() => {
  * haben denselben `offsetTop`; das stimmt immer, egal was das Raster gerade
  * rechnet.
  */
-const raster = ref<HTMLElement | null>(null)
-function messenUndSetzen() {
-  const el = raster.value
+const grid = ref<HTMLElement | null>(null)
+function measureAndSet() {
+  const el = grid.value
   if (!el) return
-  const kinder = [...el.children] as HTMLElement[]
-  if (kinder.length === 0) return
-  const oben = kinder[0]!.offsetTop
-  spalten.value = Math.max(1, kinder.filter(k => k.offsetTop === oben).length)
+  const children = [...el.children] as HTMLElement[]
+  if (children.length === 0) return
+  const top = children[0]!.offsetTop
+  columns.value = Math.max(1, children.filter(k => k.offsetTop === top).length)
 }
 
 /* ------------------------------------------------------------------------
@@ -511,16 +511,16 @@ function messenUndSetzen() {
  * Eigenschaft des Aufstellorts: der Schirm hängt so herum, wie er hängt.
  * Das geht keinen Server etwas an.
  */
-const spiegelSchluessel = `bb.board.mirror.${eventId}`
+const mirrorStorageKey = `bb.board.mirror.${eventId}`
 
-const gespiegelt = ref(false)
+const mirrored = ref(false)
 
 /** Wer angemeldet ist, samt dem, was er darf. */
-interface Angemeldeter {
+interface SignedInUser {
   user?: { display_name?: string }
   grants?: { permission_key?: string, ops?: string }[]
 }
-const wer = ref<Angemeldeter | null>(null)
+const me = ref<SignedInUser | null>(null)
 
 /**
  * Darf dieses Konto überhaupt zählen?
@@ -532,8 +532,8 @@ const wer = ref<Angemeldeter | null>(null)
  * Abweisung — und die sagt es deutlicher, als eine ausgeblendete Fläche es
  * je könnte.
  */
-const darfZaehlen = computed(() =>
-  (wer.value?.grants ?? []).some(g => g.permission_key === 'match' && (g.ops ?? '').includes('U')))
+const canScore = computed(() =>
+  (me.value?.grants ?? []).some(g => g.permission_key === 'match' && (g.ops ?? '').includes('U')))
 
 /*
  * HIER STAND DIE ANMELDUNG MIT BENUTZER UND KENNWORT — SIE IST WEG.
@@ -561,13 +561,13 @@ const darfZaehlen = computed(() =>
  * Sitzungskeks loswird. Ohne sie stünde ein Tablet mit einer fremden
  * Anmeldung schlechter da als eines ohne — und genau das darf nicht sein.
  */
-async function werBinIch() {
-  wer.value = await $fetch<Angemeldeter | null>('/api/me').catch(() => null)
+async function fetchMe() {
+  me.value = await $fetch<SignedInUser | null>('/api/me').catch(() => null)
 }
 
-async function abmelden() {
+async function signOut() {
   await $fetch('/api/session', { method: 'DELETE' }).catch(() => undefined)
-  wer.value = null
+  me.value = null
 }
 
 /* ------------------------------------------------------------------------
@@ -575,9 +575,9 @@ async function abmelden() {
  * --------------------------------------------------------------------- */
 
 /** Hält dieses Gerät eine Freigabe — und für welchen Tisch? */
-const freigabe = ref<{ released: boolean, tableNumber: number | null } | null>(null)
-const codeOffen = ref(false)
-const codeZiffern = ref('')
+const grant = ref<{ released: boolean, tableNumber: number | null } | null>(null)
+const codeOpen = ref(false)
+const codeDigits = ref('')
 
 /*
  * DAS FELD NIMMT DEN SCHREIBZEIGER SELBST.
@@ -589,24 +589,24 @@ const codeZiffern = ref('')
  * ausserdem mehr als auf dem Schirm: erst der Knopf, dann das Feld, dann
  * wartet man auf die Bildschirmtastatur.
  *
- * `nextTick`, weil das Feld erst durch `codeOffen` ins Dokument kommt — vor
+ * `nextTick`, weil das Feld erst durch `codeOpen` ins Dokument kommt — vor
  * dem naechsten Zeichnen gibt es nichts, worauf der Zeiger springen koennte.
  */
-const codeFeld = ref<HTMLInputElement | null>(null)
+const codeInput = ref<HTMLInputElement | null>(null)
 
-async function codeOeffnen() {
-  codeOffen.value = true
-  codefehler.value = ''
+async function openCode() {
+  codeOpen.value = true
+  codeError.value = ''
   await nextTick()
-  codeFeld.value?.focus()
+  codeInput.value?.focus()
 }
-const loest = ref(false)
-const codefehler = ref('')
+const releasing = ref(false)
+const codeError = ref('')
 
-const codeVollstaendig = computed(() => /^[0-9]{6}$/.test(codeZiffern.value))
+const codeComplete = computed(() => /^[0-9]{6}$/.test(codeDigits.value))
 
-async function freigabeHolen() {
-  freigabe.value = await $fetch<{ released: boolean, tableNumber: number | null }>(
+async function fetchGrant() {
+  grant.value = await $fetch<{ released: boolean, tableNumber: number | null }>(
     '/api/board/grant').catch(() => null)
 }
 
@@ -629,33 +629,33 @@ async function freigabeHolen() {
  * nicht" schickte ihn zur Turnierleitung, wo er bei einem Tippfehler
  * nichts zu suchen hat.
  */
-async function einloesen() {
-  if (!codeVollstaendig.value) return
-  loest.value = true
-  codefehler.value = ''
+async function redeem() {
+  if (!codeComplete.value) return
+  releasing.value = true
+  codeError.value = ''
   try {
     await $fetch('/api/board/grant', {
       method: 'POST',
-      body: { eventId, code: codeZiffern.value, label: geraetename() },
+      body: { eventId, code: codeDigits.value, label: deviceName() },
     })
-    codeZiffern.value = ''
-    codeOffen.value = false
-    await freigabeHolen()
+    codeDigits.value = ''
+    codeOpen.value = false
+    await fetchGrant()
   }
-  catch (fehler: unknown) {
-    const schluessel = (fehler as { data?: { data?: { error?: string } } })
+  catch (error: unknown) {
+    const code = (error as { data?: { data?: { error?: string } } })
       ?.data?.data?.error
-      ?? (fehler as { data?: { error?: string } })?.data?.error
-    codefehler.value = codetext(schluessel)
-    codeZiffern.value = ''
+      ?? (error as { data?: { error?: string } })?.data?.error
+    codeError.value = codeText(code)
+    codeDigits.value = ''
   }
   finally {
-    loest.value = false
+    releasing.value = false
   }
 }
 
-function codetext(schluessel: string | undefined): string {
-  switch (schluessel) {
+function codeText(code: string | undefined): string {
+  switch (code) {
     case 'LOCKED':
       // KEINE ZEITANGABE MEHR -- seit dem 25.09.2026.
       //
@@ -696,13 +696,13 @@ function codetext(schluessel: string | undefined): string {
  * Browserkennung reicht, um einen Schirm wiederzuerkennen — daraus baut die
  * Maske "Tisch 7 · iPad · 10.0.3.12". Der Rest steht ohnehin dort.
  */
-function geraetename(): string {
+function deviceName(): string {
   return ''
 }
 
-async function freigabeAbgeben() {
+async function releaseGrant() {
   await $fetch('/api/board/grant', { method: 'DELETE' }).catch(() => undefined)
-  await freigabeHolen()
+  await fetchGrant()
 }
 
 /**
@@ -712,11 +712,11 @@ async function freigabeAbgeben() {
  * Ein Cookie ginge an den Server und drehte jeden Schirm mit, an dem dasselbe
  * Konto angemeldet ist.
  */
-function schalten(wert: boolean) {
-  gespiegelt.value = wert
+function setMirrored(value: boolean) {
+  mirrored.value = value
   try {
-    if (wert) window.localStorage.setItem(spiegelSchluessel, '1')
-    else window.localStorage.removeItem(spiegelSchluessel)
+    if (value) window.localStorage.setItem(mirrorStorageKey, '1')
+    else window.localStorage.removeItem(mirrorStorageKey)
   }
   catch {
     // Privater Modus: die Einstellung gilt bis zum Neuladen. Eine Meldung
@@ -726,17 +726,17 @@ function schalten(wert: boolean) {
 
 onMounted(() => {
   try {
-    gespiegelt.value = window.localStorage.getItem(spiegelSchluessel) === '1'
+    mirrored.value = window.localStorage.getItem(mirrorStorageKey) === '1'
   }
   catch {
     // Kein Speicher, kein Merker — der Schirm hängt dann herum wie geliefert.
   }
-  werBinIch()
-  freigabeHolen()
+  fetchMe()
+  fetchGrant()
 })
 
 useHead({
-  title: () => `Pick a table – ${tafel.value?.eventName ?? 'Scoreboard'}`,
+  title: () => `Pick a table – ${board.value?.eventName ?? 'Scoreboard'}`,
   // Wie die Tafel: eine Auswahl für einen Saal gehört nicht in eine Suche.
   meta: [{ name: 'robots', content: 'noindex, nofollow' }],
   htmlAttrs: { class: 'board-screen' },
@@ -750,8 +750,8 @@ useHead({
     Raster die Zeilen falsch durch, und die Tischwahl bekäme die Höhe des
     Bandes statt den Rest des Schirms (grid-template-rows unten).
   -->
-  <div class="pick" :class="{ 'pick--vorher': vorschlag !== null }">
-    <template v-if="unbekannt">
+  <div class="pick" :class="{ 'pick--vorher': suggestion !== null }">
+    <template v-if="unknownEvent">
       <div class="pick__hint pick__hint--allein">
         <p class="pick__hint-title">Unknown event</p>
         <p class="pick__hint-text">Check the address of this screen.</p>
@@ -769,7 +769,7 @@ useHead({
 
     <template v-else>
       <header class="pick__head">
-        <span class="pick__event">{{ tafel?.eventName ?? '' }}</span>
+        <span class="pick__event">{{ board?.eventName ?? '' }}</span>
         <span class="pick__what">Pick a table</span>
       </header>
 
@@ -792,21 +792,21 @@ useHead({
         vor der Wahl steht. Wer ihn nicht will, sieht die Kacheln darunter
         unverändert.
       -->
-      <section v-if="vorschlag !== null" class="vorher">
+      <section v-if="suggestion !== null" class="vorher">
         <p class="vorher__wort">At the last event this screen stood at</p>
-        <p class="vorher__zahl">Table {{ vorschlag }}</p>
+        <p class="vorher__zahl">Table {{ suggestion }}</p>
         <p class="vorher__text">Nothing is open yet.</p>
         <div class="vorher__knoepfe">
-          <button type="button" class="vorher__ja" @click="vorschlagNehmen()">
-            Use table {{ vorschlag }} again
+          <button type="button" class="vorher__ja" @click="acceptSuggestion()">
+            Use table {{ suggestion }} again
           </button>
-          <button type="button" class="vorher__nein" @click="vorschlagWeg()">
+          <button type="button" class="vorher__nein" @click="dismissSuggestion()">
             Pick a different table
           </button>
         </div>
       </section>
 
-      <main v-if="tische.length === 0" class="pick__hint">
+      <main v-if="tables.length === 0" class="pick__hint">
         <p class="pick__hint-title">No tables yet</p>
         <p class="pick__hint-text">
           This screen is ready. It will show the choice as soon as tables are set up.
@@ -818,20 +818,20 @@ useHead({
         Aufbau nach, waehrend Tische dazukommen; ohne Schluessel setzt Vue
         nach Position um, und dann haengt am neuen Feld der alte Klick.
       -->
-      <main v-else ref="raster" class="pick__grid">
+      <main v-else ref="grid" class="pick__grid">
         <button
-          v-for="(t, i) in tische"
+          v-for="(t, i) in tables"
           :key="t.number"
           type="button"
           class="pick__table"
           :class="{
-            'pick__table--on': i === stelle,
+            'pick__table--on': i === index,
             'pick__table--blocked': t.isBlocked,
-            'pick__table--oeffnet': oeffnet === t.number,
+            'pick__table--oeffnet': opening === t.number,
           }"
-          :aria-busy="oeffnet === t.number"
-          @click="waehlen(t.number)"
-          @mouseenter="stelle = i"
+          :aria-busy="opening === t.number"
+          @click="choose(t.number)"
+          @mouseenter="index = i"
         >
           <span class="pick__number">{{ t.number }}</span>
           <span v-if="t.name" class="pick__name">{{ t.name }}</span>
@@ -841,7 +841,7 @@ useHead({
             Platz: die Kachel darf beim Antippen nicht die Groesse aendern,
             sonst wandern die Nachbarn unter dem Finger weg.
           -->
-          <span v-if="oeffnet === t.number" class="pick__laeuft" aria-hidden="true" />
+          <span v-if="opening === t.number" class="pick__laeuft" aria-hidden="true" />
         </button>
       </main>
 
@@ -876,7 +876,7 @@ useHead({
         -->
         <p class="zaehlen__zeile">
           <span class="zaehlen__wort">Event</span>
-          <span class="zaehlen__text">{{ tafel?.eventName ?? '' }}</span>
+          <span class="zaehlen__text">{{ board?.eventName ?? '' }}</span>
           <button
             type="button" class="zaehlen__knopf"
             @click="navigateTo('/board?switch=1')"
@@ -890,16 +890,16 @@ useHead({
           der in der Halle gemeint ist — zwanzig Bildschirme, ein Code, und
           niemand meldet zwanzig Bildschirme einzeln an.
         -->
-        <p v-if="freigabe?.released" class="zaehlen__zeile">
+        <p v-if="grant?.released" class="zaehlen__zeile">
           <span class="zaehlen__wort">Scoring</span>
           <span class="zaehlen__text">
             This screen counts
-            <template v-if="freigabe.tableNumber">
-              at table {{ freigabe.tableNumber }}
+            <template v-if="grant.tableNumber">
+              at table {{ grant.tableNumber }}
             </template>
             <template v-else>· pick a table above</template>
           </span>
-          <button type="button" class="zaehlen__knopf" @click="freigabeAbgeben">
+          <button type="button" class="zaehlen__knopf" @click="releaseGrant">
             Stop counting here
           </button>
         </p>
@@ -909,8 +909,8 @@ useHead({
             <span class="zaehlen__wort">Scoring</span>
             <span class="zaehlen__text">This screen only shows the score.</span>
             <button
-              v-if="!codeOffen" type="button" class="zaehlen__knopf"
-              @click="codeOeffnen"
+              v-if="!codeOpen" type="button" class="zaehlen__knopf"
+              @click="openCode"
             >
               Enter board code
             </button>
@@ -925,23 +925,23 @@ useHead({
             bringt Pfeilchen zum Hoch- und Runterzaehlen mit und wirft
             fuehrende Nullen weg, und `0042` ist ein gueltiger Code.
           -->
-          <form v-if="codeOffen" class="zaehlen__form" @submit.prevent="einloesen">
+          <form v-if="codeOpen" class="zaehlen__form" @submit.prevent="redeem">
             <input
-              ref="codeFeld"
-              v-model="codeZiffern" class="zaehlen__code"
+              ref="codeInput"
+              v-model="codeDigits" class="zaehlen__code"
               inputmode="numeric" autocomplete="off" maxlength="6"
               placeholder="······" aria-label="Board code" required
             >
             <button
               type="submit" class="zaehlen__knopf zaehlen__knopf--an"
-              :disabled="loest || !codeVollstaendig"
+              :disabled="releasing || !codeComplete"
             >
-              {{ loest ? 'Releasing …' : 'Release this screen' }}
+              {{ releasing ? 'Releasing …' : 'Release this screen' }}
             </button>
-            <button type="button" class="zaehlen__knopf" @click="codeOffen = false">
+            <button type="button" class="zaehlen__knopf" @click="codeOpen = false">
               Cancel
             </button>
-            <p v-if="codefehler" class="zaehlen__fehler" role="alert">{{ codefehler }}</p>
+            <p v-if="codeError" class="zaehlen__fehler" role="alert">{{ codeError }}</p>
             <p class="zaehlen__hinweis">
               The tournament office reads out a six digit code. It releases this
               one screen for one table — no account needed.
@@ -962,9 +962,9 @@ useHead({
           Sitzungskeks ergibt hier nichts, und der Schirm behauptet dann auch
           nicht, es sei jemand da.
         -->
-        <p v-if="wer" class="zaehlen__zeile">
+        <p v-if="me" class="zaehlen__zeile">
           <span class="zaehlen__wort">Signed in</span>
-          <span class="zaehlen__text">{{ wer.user?.display_name ?? 'Signed in' }}</span>
+          <span class="zaehlen__text">{{ me.user?.display_name ?? 'Signed in' }}</span>
 
           <!--
             Der Hinweis gilt nur, solange dieser Schirm NICHT freigeschaltet
@@ -974,11 +974,11 @@ useHead({
             schickte jemanden auf die Suche nach einem Fehler, den es nicht
             gibt.
           -->
-          <span v-if="!darfZaehlen && !freigabe?.released" class="zaehlen__warnung">
+          <span v-if="!canScore && !grant?.released" class="zaehlen__warnung">
             no scoring permission for this account
           </span>
 
-          <button type="button" class="zaehlen__knopf" @click="abmelden">Sign out</button>
+          <button type="button" class="zaehlen__knopf" @click="signOut">Sign out</button>
         </p>
 
         <!--
@@ -994,10 +994,10 @@ useHead({
           <button
             type="button"
             class="zaehlen__knopf"
-            :class="{ 'zaehlen__knopf--an': gespiegelt }"
-            @click="schalten(!gespiegelt)"
+            :class="{ 'zaehlen__knopf--an': mirrored }"
+            @click="setMirrored(!mirrored)"
           >
-            Swap sides: {{ gespiegelt ? 'on' : 'off' }}
+            Swap sides: {{ mirrored ? 'on' : 'off' }}
           </button>
         </p>
       </section>
@@ -1009,7 +1009,7 @@ useHead({
           keine Rueckmeldung, und wer "1" gedrueckt hat und nichts sieht,
           drueckt noch einmal — und landet auf Tisch 11.
         -->
-        <span v-if="getippt" class="pick__typed">{{ getippt }}</span>
+        <span v-if="typed" class="pick__typed">{{ typed }}</span>
         <!--
           Der Hinweis nennt jetzt beide Nullen — die auf der Tafel, die
           hierher zurückführt, und die hier, die eine Stufe weiter zur

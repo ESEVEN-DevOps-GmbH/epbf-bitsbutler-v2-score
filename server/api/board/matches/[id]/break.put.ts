@@ -20,19 +20,19 @@ export default defineEventHandler(async (event) => {
   const id = parseId(getRouterParam(event, 'id'), 'Partiekennung')
   const body = await readBody<{ firstBreak?: string | null, nextBreak?: string | null }>(event)
 
-  const seite = (wert: unknown): string | null => {
-    const s = String(wert ?? '').trim().toUpperCase()
+  const side = (value: unknown): string | null => {
+    const s = String(value ?? '').trim().toUpperCase()
     return s === 'A' || s === 'B' ? s : null
   }
 
-  const erster = seite(body?.firstBreak)
-  const naechster = seite(body?.nextBreak)
-  if (!erster && !naechster) {
+  const firstSide = side(body?.firstBreak)
+  const nextSide = side(body?.nextBreak)
+  if (!firstSide && !nextSide) {
     throw createError({ statusCode: 400, statusMessage: 'Keine Seite' })
   }
 
-  return await anDieVerwaltung(event, `/matches/${id}/break`, {
+  return await toAdmin(event, `/matches/${id}/break`, {
     method: 'PUT',
-    body: { firstBreak: erster, nextBreak: naechster },
+    body: { firstBreak: firstSide, nextBreak: nextSide },
   })
 })

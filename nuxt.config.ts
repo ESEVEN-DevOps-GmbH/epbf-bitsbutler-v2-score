@@ -147,12 +147,12 @@ export default defineNuxtConfig({
      * server/routes/board.webmanifest.get.ts. Dieselben Werte wie in
      * epbf-website, wo sie schon produktbezogen und nicht verbandsbezogen
      * gewählt waren ("BitsButler Scoreboard", nicht "EPBF"). Übersteuerbar
-     * über NUXT_TAFEL_APP_NAME / NUXT_TAFEL_APP_KURZNAME, Nuxts eigener
+     * über NUXT_BOARD_APP_NAME / NUXT_BOARD_APP_SHORT_NAME, Nuxts eigener
      * Konvention — anders als BB_API/BB_SITE geht es hier nicht um die
      * eine Backend-Adresse, für die die Instanzen-Konvention gilt.
      */
-    tafelAppName: 'BitsButler Scoreboard',
-    tafelAppKurzname: 'Scoreboard',
+    boardAppName: 'BitsButler Scoreboard',
+    boardAppShortName: 'Scoreboard',
 
     public: {},
   },

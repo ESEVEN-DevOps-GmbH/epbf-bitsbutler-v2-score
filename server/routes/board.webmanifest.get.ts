@@ -12,7 +12,7 @@
  * Wegen des Namens. `name` traegt den Verband, und ein Verbandsname in einer
  * ausgelieferten Datei waere derselbe verdrahtete Mandant, den useTenant()
  * ueberall sonst vermeidet. Hier kommt er aus der serverseitigen
- * runtimeConfig und laesst sich je Umgebung ueber NUXT_TAFEL_APP_NAME
+ * runtimeConfig und laesst sich je Umgebung ueber NUXT_BOARD_APP_NAME
  * setzen — ohne neuen Bau und ohne dass der Wert in den Payload jeder
  * gewoehnlichen Seite wandert (`public` waere genau das gewesen).
  *
@@ -36,8 +36,8 @@ export default defineEventHandler((event) => {
    */
   const manifest = {
     id: '/board',
-    name: config.tafelAppName,
-    short_name: config.tafelAppKurzname,
+    name: config.boardAppName,
+    short_name: config.boardAppShortName,
     description: 'Table scoreboard for the hall.',
     /*
      * Die Startadresse ist die Tischwahl OHNE Veranstaltungskennung. Das ist

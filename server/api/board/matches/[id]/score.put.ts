@@ -68,16 +68,16 @@ export default defineEventHandler(async (event) => {
    * weggelassen statt abgewiesen — der STAND soll deshalb nicht verloren
    * gehen; er ist die Angabe, auf die es am Tisch ankommt.
    */
-  function ganzzahl(roh: unknown, min: number, max: number): number | undefined {
-    const n = Number(roh)
-    if (roh === undefined || roh === null || !Number.isInteger(n)) return undefined
+  function intInRange(raw: unknown, min: number, max: number): number | undefined {
+    const n = Number(raw)
+    if (raw === undefined || raw === null || !Number.isInteger(n)) return undefined
     return n >= min && n <= max ? n : undefined
   }
 
-  const kugeln = ganzzahl(body?.ballsOnTable, 0, 15)
-  const foulsA = ganzzahl(body?.foulsA, 0, 2)
-  const foulsB = ganzzahl(body?.foulsB, 0, 2)
-  const amTisch = body?.atTable === 'A' || body?.atTable === 'B' ? body.atTable : undefined
+  const ballsOnTable = intInRange(body?.ballsOnTable, 0, 15)
+  const foulsA = intInRange(body?.foulsA, 0, 2)
+  const foulsB = intInRange(body?.foulsB, 0, 2)
+  const atTable = body?.atTable === 'A' || body?.atTable === 'B' ? body.atTable : undefined
 
   /*
    * DIE AUFNAHME JE SEITE — laufend und höchste (WPA 7.4).
@@ -93,12 +93,12 @@ export default defineEventHandler(async (event) => {
    * verloren. Deshalb fällt hier lieber das Paar weg — dieselbe Abwägung wie
    * bei den Restkugeln eine Handbreit darüber.
    */
-  const laufA = ganzzahl(body?.runA, 0, 999)
-  const hochA = ganzzahl(body?.highA, 0, 999)
-  const laufB = ganzzahl(body?.runB, 0, 999)
-  const hochB = ganzzahl(body?.highB, 0, 999)
-  const aufnahmeA = laufA !== undefined && hochA !== undefined && hochA >= laufA
-  const aufnahmeB = laufB !== undefined && hochB !== undefined && hochB >= laufB
+  const runA = intInRange(body?.runA, 0, 999)
+  const highA = intInRange(body?.highA, 0, 999)
+  const runB = intInRange(body?.runB, 0, 999)
+  const highB = intInRange(body?.highB, 0, 999)
+  const hasRunA = runA !== undefined && highA !== undefined && highA >= runA
+  const hasRunB = runB !== undefined && highB !== undefined && highB >= runB
 
   /*
    * WELCHES FOUL — und nur diese drei Wörter.
@@ -126,17 +126,17 @@ export default defineEventHandler(async (event) => {
    * nicht ausdrücklich `true` ist, ist eine Korrektur — die alte Auslegung,
    * und damit die sichere.
    */
-  return await anDieVerwaltung(event, `/matches/${id}/score`, {
+  return await toAdmin(event, `/matches/${id}/score`, {
     method: 'PUT',
     body: {
       scoreA: a, scoreB: b, undo: body?.undo === true,
-      ...(kugeln === undefined ? {} : { ballsOnTable: kugeln }),
+      ...(ballsOnTable === undefined ? {} : { ballsOnTable }),
       ...(foulsA === undefined ? {} : { foulsA }),
       ...(foulsB === undefined ? {} : { foulsB }),
-      ...(amTisch === undefined ? {} : { atTable: amTisch }),
+      ...(atTable === undefined ? {} : { atTable }),
       ...(foul === undefined ? {} : { foul }),
-      ...(aufnahmeA ? { runA: laufA, highA: hochA } : {}),
-      ...(aufnahmeB ? { runB: laufB, highB: hochB } : {}),
+      ...(hasRunA ? { runA, highA } : {}),
+      ...(hasRunB ? { runB, highB } : {}),
     },
   })
 })

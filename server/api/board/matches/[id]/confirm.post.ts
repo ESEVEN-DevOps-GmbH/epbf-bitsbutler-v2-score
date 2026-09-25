@@ -26,6 +26,6 @@
 export default defineEventHandler(async (event) => {
   const id = parseId(getRouterParam(event, 'id'), 'Partiekennung')
 
-  return await anDieVerwaltung<{ advanced: number, newlySettled: number }>(
+  return await toAdmin<{ advanced: number, newlySettled: number }>(
     event, `/matches/${id}/confirm`, { method: 'POST' })
 })

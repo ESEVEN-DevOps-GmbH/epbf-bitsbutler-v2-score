@@ -8,12 +8,12 @@
  */
 export default defineEventHandler(async (event) => {
   const body = await readBody<{ tableNumber?: number }>(event)
-  const nummer = body?.tableNumber
+  const tableNumber = body?.tableNumber
 
-  if (!Number.isInteger(nummer) || (nummer as number) < 1 || (nummer as number) > 999) {
+  if (!Number.isInteger(tableNumber) || (tableNumber as number) < 1 || (tableNumber as number) > 999) {
     throw createError({ statusCode: 400, statusMessage: 'Keine Tischnummer' })
   }
 
-  return await anDieVerwaltung<{ tableNumber: number }>(
-    event, '/board/grant/table', { method: 'PUT', body: { tableNumber: nummer } })
+  return await toAdmin<{ tableNumber: number }>(
+    event, '/board/grant/table', { method: 'PUT', body: { tableNumber } })
 })

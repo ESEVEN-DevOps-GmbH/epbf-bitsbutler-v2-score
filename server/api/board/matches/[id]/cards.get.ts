@@ -40,12 +40,12 @@
  *
  * WAS OHNE BEIDES PASSIERT
  *
- * `vonDerVerwaltung` gibt dann `null`. Daraus wird hier ein leerer Block und
+ * `fromAdmin` gibt dann `null`. Daraus wird hier ein leerer Block und
  * kein Fehler — dieselbe Entscheidung wie beim Verlauf nebenan: ein Gerät
  * ohne Freigabe und ohne Anmeldung kommt gar nicht bis ins Menü, und eine
  * rote Zeile für einen Fall, den es nicht gibt, wäre am Tisch nur Lärm.
  */
-export interface KartenStand {
+export interface SideStanding {
   side: 'A' | 'B'
   playerId: string
   displayName: string
@@ -70,25 +70,25 @@ export interface KartenStand {
  * folgt aus einer Karte auf dem Stand ROT und wird vom Turnierleiter oder
  * Sportdirektor gegeben (Fußnote zu § 9.1).
  */
-export interface Kartenanlass {
+export interface CardReason {
   code: string
   text: string
   paragraph: string
-  karte: 'GREEN' | 'YELLOW' | 'RED'
+  card: 'GREEN' | 'YELLOW' | 'RED'
 }
 
 export default defineEventHandler(async (event): Promise<{
   eventId: string | null
-  sides: KartenStand[]
-  reasons: Kartenanlass[]
+  sides: SideStanding[]
+  reasons: CardReason[]
   mayDisqualify: boolean
 }> => {
-  const roh = String(getRouterParam(event, 'id') ?? '')
-  if (!/^[0-9a-f-]{36}$/i.test(roh)) {
+  const raw = String(getRouterParam(event, 'id') ?? '')
+  if (!/^[0-9a-f-]{36}$/i.test(raw)) {
     throw createError({ statusCode: 400, statusMessage: 'Keine Partiekennung' })
   }
 
-  const antwort = await vonDerVerwaltung<{
+  const response = await fromAdmin<{
     eventId: string
     mayDisqualify: boolean
     reasons: Array<{
@@ -105,33 +105,33 @@ export default defineEventHandler(async (event): Promise<{
       family_name: string | null
       standing: string
     }>
-  }>(event, `/matches/${roh}/cards`)
+  }>(event, `/matches/${raw}/cards`)
 
   return {
-    eventId: antwort?.eventId ?? null,
-    mayDisqualify: antwort?.mayDisqualify === true,
+    eventId: response?.eventId ?? null,
+    mayDisqualify: response?.mayDisqualify === true,
     /*
      * Eine leere Liste ist hier kein Fehler, sondern eine Ansage: das Menü
-     * greift dann auf seine eingebaute zurück (siehe Schirimenue.vue). Wer
+     * greift dann auf seine eingebaute zurück (siehe RefereeMenu.vue). Wer
      * hier würfe, hielte den ganzen Block "Warnings" an — und damit auch den
      * Stand, den der Schiedsrichter sehen muss, bevor er entscheidet.
      */
-    reasons: (antwort?.reasons ?? [])
+    reasons: (response?.reasons ?? [])
       .filter(a => a?.card === 'GREEN' || a?.card === 'YELLOW' || a?.card === 'RED')
       .map(a => ({
         code: String(a.code ?? ''),
         text: String(a.text ?? '').trim(),
         paragraph: String(a.paragraph ?? '').trim(),
-        karte: a.card as Kartenanlass['karte'],
+        card: a.card as CardReason['card'],
       }))
       .filter(a => a.code !== '' && a.text !== ''),
-    sides: (antwort?.sides ?? []).map(z => ({
+    sides: (response?.sides ?? []).map(z => ({
       side: z.side,
       playerId: String(z.player_id ?? ''),
       displayName: String(z.display_name ?? '').trim(),
       givenName: z.given_name ?? null,
       familyName: z.family_name ?? null,
-      standing: (z.standing ?? 'NONE') as KartenStand['standing'],
+      standing: (z.standing ?? 'NONE') as SideStanding['standing'],
     })),
   }
 })

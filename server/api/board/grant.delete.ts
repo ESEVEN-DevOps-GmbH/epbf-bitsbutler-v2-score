@@ -10,7 +10,7 @@
  * weiteren Anfrage eine Abweisung, die niemand mehr beheben kann.
  */
 export default defineEventHandler(async (event) => {
-  const summary = await anDieVerwaltung<{ released: number }>(
+  const summary = await toAdmin<{ released: number }>(
     event, '/board/grant', { method: 'DELETE' })
 
   deleteCookie(event, 'bb_board', { path: '/' })

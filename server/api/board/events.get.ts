@@ -52,7 +52,7 @@ import type { BoardEventItem, BoardEventList, TourSummary } from '~~/shared/type
  */
 
 /** Was `/series/<key>/events` je Zeile liefert — Schlangenschrift wie dort. */
-interface RohVeranstaltung {
+interface RawEvent {
   event_id: string
   name: string
   starts_on: string
@@ -62,22 +62,22 @@ interface RohVeranstaltung {
 }
 
 /** Was `/events/<id>` an Ort mitbringt. */
-interface RohDetail {
+interface RawEventDetail {
   venues?: { name?: string, city?: string | null, country?: string | null }[]
 }
 
 /** Ein Datum ohne Uhrzeit, in der Zeitzone dieses Servers. */
-function tag(iso: string): Date | null {
+function toDate(iso: string): Date | null {
   const d = new Date(`${iso}T00:00:00`)
   return Number.isNaN(d.valueOf()) ? null : d
 }
 
-function heute(): Date {
+function today(): Date {
   const j = new Date()
   return new Date(j.getFullYear(), j.getMonth(), j.getDate())
 }
 
-function plusTage(d: Date, n: number): Date {
+function addDays(d: Date, n: number): Date {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate() + n)
 }
 
@@ -96,26 +96,27 @@ function plusTage(d: Date, n: number): Date {
  * landete). Was dieser Server für sich behält, ist davon unberührt — und es
  * ist für alle Geräte dieselbe öffentliche Liste.
  */
-const sammeln = defineCachedFunction(
-  async (basis: string, seite: string): Promise<BoardEventItem[]> => {
-    async function hole<T>(pfad: string): Promise<T> {
+const collectEvents = defineCachedFunction(
+  async (base: string, site: string): Promise<BoardEventItem[]> => {
+    async function fetchPublic<T>(path: string): Promise<T> {
       // Die Zusicherung ist nötig, weil $fetch seinen Rückgabetyp aus der
       // Adresse ableiten will und bei einer zusammengesetzten nichts findet
-      // — wortgleich zu `hole` in shared/api/http.ts. Was hier wirklich
-      // prüft, sind die Aufrufstellen unten mit ihren Vertragstypen.
-      return await $fetch<T>(`${basis}/api/public/v1${pfad}`, {
-        headers: { 'X-BB-Site': seite },
+      // — inhaltlich wortgleich zu `hole()` in shared/api/http.ts (dort
+      // weiterhin so benannt). Was hier wirklich prüft, sind die
+      // Aufrufstellen unten mit ihren Vertragstypen.
+      return await $fetch<T>(`${base}/api/public/v1${path}`, {
+        headers: { 'X-BB-Site': site },
         timeout: 10_000,
       }) as T
     }
 
-    const serien = await hole<TourSummary[]>('/tours').catch(() => [])
+    const tours = await fetchPublic<TourSummary[]>('/tours').catch(() => [])
 
-    const listen = await Promise.all(serien.map(s =>
+    const lists = await Promise.all(tours.map(s =>
       // Eine Serie, die klemmt, darf die Halle nicht lahmlegen: dann fehlen
       // ihre Veranstaltungen, und die der anderen stehen trotzdem da.
-      hole<RohVeranstaltung[]>(`/series/${encodeURIComponent(s.code)}/events`)
-        .catch(() => [] as RohVeranstaltung[]),
+      fetchPublic<RawEvent[]>(`/series/${encodeURIComponent(s.code)}/events`)
+        .catch(() => [] as RawEvent[]),
     ))
 
     /*
@@ -125,8 +126,8 @@ const sammeln = defineCachedFunction(
      * stünde sie zweimal in der Auswahl, und wer die zweite Kachel trifft,
      * fragte sich zu Recht, was der Unterschied ist.
      */
-    const nach = new Map<string, RohVeranstaltung>()
-    for (const entryList of listen) {
+    const byId = new Map<string, RawEvent>()
+    for (const entryList of lists) {
       for (const v of entryList) {
         // `CANCELED` steht in den Serienlisten mit drin und gehört nicht auf
         // eine Anzeigetafel: an einer abgesagten Veranstaltung wird nicht
@@ -134,11 +135,11 @@ const sammeln = defineCachedFunction(
         // her.
         if (!v?.event_id) continue
         if (String(v.status ?? '').toUpperCase() === 'CANCELED') continue
-        nach.set(String(v.event_id), v)
+        byId.set(String(v.event_id), v)
       }
     }
 
-    return [...nach.values()].map((v): BoardEventItem => ({
+    return [...byId.values()].map((v): BoardEventItem => ({
       id: String(v.event_id),
       name: String(v.name ?? ''),
       startDate: String(v.starts_on ?? ''),
@@ -157,13 +158,13 @@ const sammeln = defineCachedFunction(
     // Ein Schlüssel je Mandant: dieselbe Seite fragt immer mit demselben,
     // aber die Route soll nicht der Grund sein, warum ein zweiter Mandant
     // auf demselben Server die Liste des ersten sähe.
-    getKey: (_basis: string, seite: string) => seite || 'ohne-mandant',
+    getKey: (_base: string, site: string) => site || 'ohne-mandant',
   },
 )
 
 export default defineEventHandler(async (event): Promise<BoardEventList> => {
   const config = useRuntimeConfig()
-  const basis = String(process.env.BB_API ?? '')
+  const base = String(process.env.BB_API ?? '')
 
   /*
    * DER SEITENSCHLUESSEL DARF AUS DER ANFRAGE KOMMEN -- seit dem
@@ -193,12 +194,12 @@ export default defineEventHandler(async (event): Promise<BoardEventList> => {
    * unterschiede sie die beiden Faelle, waere sie eine Auskunft darueber,
    * WELCHE Schluessel es gibt.
    */
-  const ausDerAnfrage = String(getQuery(event).site ?? '').trim()
-  const seite = ausDerAnfrage || String(process.env.BB_SITE ?? '')
+  const fromRequest = String(getQuery(event).site ?? '').trim()
+  const site = fromRequest || String(process.env.BB_SITE ?? '')
 
   /*
    * Die Bau-Kennung dieses Servers — siehe
-   * app/composables/useFassungswechsel.ts. Sie steht in BEIDEN Antworten,
+   * app/composables/useVersionSwitch.ts. Sie steht in BEIDEN Antworten,
    * auch in der leeren: ein Tablet, das am Aufbautag vor einer leeren Liste
    * steht, ist genau das Gerät, das gleich eine neue Fassung braucht.
    */
@@ -212,29 +213,29 @@ export default defineEventHandler(async (event): Promise<BoardEventList> => {
    * Liste — eine Tafelauswahl aus erfundenen Veranstaltungen wäre eine
    * Falle: wer sie anklickt, landet auf einer Tischwahl, die es nicht gibt.
    */
-  if (!basis) return { events: [], next: null, buildId }
+  if (!base) return { events: [], next: null, buildId }
 
-  const alle = await sammeln(basis, seite)
-  const jetzt = heute()
+  const all = await collectEvents(base, site)
+  const now = today()
 
-  const imFenster: BoardEventItem[] = []
-  let naechste: BoardEventList['next'] = null
+  const inWindow: BoardEventItem[] = []
+  let nextEvent: BoardEventList['next'] = null
 
-  for (const v of alle) {
-    const von = tag(v.startDate)
-    const bis = tag(v.endDate) ?? von
-    if (!von || !bis) continue
+  for (const v of all) {
+    const from = toDate(v.startDate)
+    const to = toDate(v.endDate) ?? from
+    if (!from || !to) continue
 
     // Dasselbe Fenster wie der Tafelcode: zwei Tage vor Beginn bis
     // einschliesslich einen Tag nach dem Ende.
-    if (jetzt >= plusTage(von, -2) && jetzt <= plusTage(bis, 1)) {
-      imFenster.push({ ...v, running: jetzt >= von && jetzt <= bis })
+    if (now >= addDays(from, -2) && now <= addDays(to, 1)) {
+      inWindow.push({ ...v, running: now >= from && now <= to })
       continue
     }
 
     // Und die nächste danach — nur fürs leere Bild, nicht zum Anklicken.
-    if (von > jetzt && (!naechste || v.startDate < naechste.startDate)) {
-      naechste = { name: v.name, startDate: v.startDate, endDate: v.endDate }
+    if (from > now && (!nextEvent || v.startDate < nextEvent.startDate)) {
+      nextEvent = { name: v.name, startDate: v.startDate, endDate: v.endDate }
     }
   }
 
@@ -245,7 +246,7 @@ export default defineEventHandler(async (event): Promise<BoardEventList> => {
    * Liste, weil eines am Vortag endete, soll das laufende oben stehen und
    * nicht das alphabetisch erste. Innerhalb der Gruppen nach Beginn.
    */
-  imFenster.sort((a, b) =>
+  inWindow.sort((a, b) =>
     Number(b.running) - Number(a.running)
     || a.startDate.localeCompare(b.startDate)
     || a.name.localeCompare(b.name))
@@ -259,15 +260,15 @@ export default defineEventHandler(async (event): Promise<BoardEventList> => {
    * Ein Fehlschlag kostet den Ort und nicht die Zeile: die Kennung, der Name
    * und der Zeitraum reichen zum Wählen.
    */
-  const events = await Promise.all(imFenster.map(async (v) => {
-    const detail = await $fetch<RohDetail>(
-      `${basis}/api/public/v1/events/${encodeURIComponent(v.id)}`,
-      { headers: { 'X-BB-Site': seite }, timeout: 10_000 },
+  const events = await Promise.all(inWindow.map(async (v) => {
+    const detail = await $fetch<RawEventDetail>(
+      `${base}/api/public/v1/events/${encodeURIComponent(v.id)}`,
+      { headers: { 'X-BB-Site': site }, timeout: 10_000 },
     ).catch(() => null)
 
-    const ort = detail?.venues?.[0] ?? null
-    return { ...v, city: ort?.city ?? null, country: ort?.country ?? null }
+    const location = detail?.venues?.[0] ?? null
+    return { ...v, city: location?.city ?? null, country: location?.country ?? null }
   }))
 
-  return { events, next: naechste, buildId }
+  return { events, next: nextEvent, buildId }
 })

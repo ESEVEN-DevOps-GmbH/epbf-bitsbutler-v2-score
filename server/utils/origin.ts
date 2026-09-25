@@ -27,9 +27,9 @@ import type { H3Event } from 'h3'
  * Das ist der Entwicklungsfall und zugleich der einzige Weg, die Bremse
  * überhaupt zu prüfen, ohne zwanzig Rechner zu haben.
  */
-export function herkunftskette(event: H3Event): string | undefined {
-  const kette = getRequestHeader(event, 'x-forwarded-for')
-  const gegenstelle = event.node.req.socket.remoteAddress
-  const zusammen = [kette, gegenstelle].filter(Boolean).join(', ')
-  return zusammen || undefined
+export function originChain(event: H3Event): string | undefined {
+  const chain = getRequestHeader(event, 'x-forwarded-for')
+  const peer = event.node.req.socket.remoteAddress
+  const combined = [chain, peer].filter(Boolean).join(', ')
+  return combined || undefined
 }

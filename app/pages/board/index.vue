@@ -48,7 +48,7 @@ definePageMeta({ layout: false })
 const route = useRoute()
 
 /** Kam der Aufruf über „Switch event"? Dann nicht wieder wegspringen. */
-const wechselwunsch = computed(() => route.query.switch !== undefined)
+const wantsSwitch = computed(() => route.query.switch !== undefined)
 
 /*
  * Der Seitenschluessel aus der Adresse -- fuer den Lesezeichen-Link eines
@@ -63,18 +63,18 @@ const wechselwunsch = computed(() => route.query.switch !== undefined)
  * Liste fuer alle weiteren gaelte -- wer den Link oeffnet, saehe die
  * ungefilterte Liste aus dem Zwischenspeicher.
  */
-const seite = computed(() => String(route.query.site ?? '').trim())
+const site = computed(() => String(route.query.site ?? '').trim())
 
 const { data, error, refresh } = await useAsyncData(
-  () => `board-events:${seite.value || '*'}`,
+  () => `board-events:${site.value || '*'}`,
   () => $fetch<BoardEventList>('/api/board/events', {
-    query: seite.value ? { site: seite.value } : undefined,
+    query: site.value ? { site: site.value } : undefined,
   }),
-  { default: () => ({ events: [], next: null }) as BoardEventList, watch: [seite] },
+  { default: () => ({ events: [], next: null }) as BoardEventList, watch: [site] },
 )
 
 const events = computed(() => data.value?.events ?? [])
-const naechste = computed(() => data.value?.next ?? null)
+const next = computed(() => data.value?.next ?? null)
 
 /**
  * EINE NEUE FASSUNG — hier ohne jeden Vorbehalt.
@@ -87,8 +87,8 @@ const naechste = computed(() => data.value?.next ?? null)
  * Gemeldet wird in einem Beobachter und nicht im Abruf: `refresh()` schreibt
  * `data` und gibt nichts zurück, was hier zu greifen wäre.
  */
-const fassung = useFassungswechsel({ darf: () => true })
-watch(() => data.value?.buildId, k => fassung.melden(k), { immediate: true })
+const versionSwitch = useVersionSwitch({ allowed: () => true })
+watch(() => data.value?.buildId, k => versionSwitch.report(k), { immediate: true })
 
 /* ------------------------------------------------------------------------
  * DER MERKER
@@ -101,12 +101,12 @@ watch(() => data.value?.buildId, k => fassung.melden(k), { immediate: true })
  * auf keinem Server etwas zu suchen. Genau wie `bb.board.table.<eventId>`
  * und `bb.board.mirror.<eventId>` nebenan.
  */
-const merkschluessel = 'bb.board.event'
+const storageKey = 'bb.board.event'
 
-function gemerkt(): string | null {
+function remembered(): string | null {
   if (import.meta.server) return null
   try {
-    return window.localStorage.getItem(merkschluessel) || null
+    return window.localStorage.getItem(storageKey) || null
   }
   catch {
     // Privater Modus: kein Merker, dann eben jedes Mal die Auswahl.
@@ -114,9 +114,9 @@ function gemerkt(): string | null {
   }
 }
 
-function merken(id: string) {
+function remember(id: string) {
   try {
-    window.localStorage.setItem(merkschluessel, id)
+    window.localStorage.setItem(storageKey, id)
   }
   catch {
     /* siehe oben — die Wahl gilt trotzdem, nur nicht über den Neustart. */
@@ -134,25 +134,25 @@ function merken(id: string) {
  * Deshalb steht hier `eventId` und nicht nur `released`: ohne sie wüsste
  * diese Seite nicht, ob ein Wechsel ein Wechsel ist.
  */
-const freigabe = ref<{
+const grant = ref<{
   released: boolean, eventId: string | null, tableNumber: number | null
 } | null>(null)
 
-async function freigabeHolen() {
-  freigabe.value = await $fetch<{
+async function fetchGrant() {
+  grant.value = await $fetch<{
     released: boolean, eventId: string | null, tableNumber: number | null
   }>('/api/board/grant').catch(() => null)
 }
 
 /** Die Veranstaltung, an der dieses Gerät gerade zählen darf — oder null. */
-const zaehltBei = computed(() =>
-  freigabe.value?.released ? freigabe.value.eventId : null)
+const countsAt = computed(() =>
+  grant.value?.released ? grant.value.eventId : null)
 
 /* ------------------------------------------------------------------------
  * DIE WAHL
  * --------------------------------------------------------------------- */
 
-const oeffnet = ref<string | null>(null)
+const opening = ref<string | null>(null)
 
 /**
  * Eine Veranstaltung wählen — und dabei die alte Freigabe abgeben.
@@ -180,13 +180,13 @@ const oeffnet = ref<string | null>(null)
  * bleibt die alte Freigabe stehen — dann nimmt sie die Turnierleitung in
  * ihrer Maske zurück, wie jede andere auch.
  */
-async function waehlen(v: BoardEventItem) {
-  if (oeffnet.value === v.id) return
-  oeffnet.value = v.id
+async function choose(v: BoardEventItem) {
+  if (opening.value === v.id) return
+  opening.value = v.id
 
-  merken(v.id)
+  remember(v.id)
 
-  if (zaehltBei.value && zaehltBei.value !== v.id) {
+  if (countsAt.value && countsAt.value !== v.id) {
     await $fetch('/api/board/grant', { method: 'DELETE' }).catch(() => undefined)
   }
 
@@ -207,42 +207,42 @@ async function waehlen(v: BoardEventItem) {
  * Turnier und nicht vierhundert; mehr als neun Zeilen sind hier nicht zu
  * erwarten, und für den Rest bleiben Pfeile und Finger.
  */
-const stelle = ref(0)
+const index = ref(0)
 
-function bewegen(d: number) {
+function move(d: number) {
   const n = events.value.length
   if (n === 0) return
-  stelle.value = (stelle.value + d + n) % n
+  index.value = (index.value + d + n) % n
 }
 
-function taste(ev: KeyboardEvent) {
-  const ziel = ev.target as HTMLElement | null
-  if (ziel && /^(input|textarea|select)$/i.test(ziel.tagName)) return
+function onKey(ev: KeyboardEvent) {
+  const target = ev.target as HTMLElement | null
+  if (target && /^(input|textarea|select)$/i.test(target.tagName)) return
   if (events.value.length === 0) return
 
   if (ev.key >= '1' && ev.key <= '9') {
     const i = Number.parseInt(ev.key, 10) - 1
     const v = events.value[i]
     if (v) {
-      stelle.value = i
-      waehlen(v)
+      index.value = i
+      choose(v)
     }
     ev.preventDefault()
     return
   }
 
-  const schritt: Record<string, number> = {
+  const step: Record<string, number> = {
     ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1,
   }
-  if (ev.key in schritt) {
-    bewegen(schritt[ev.key]!)
+  if (ev.key in step) {
+    move(step[ev.key]!)
     ev.preventDefault()
     return
   }
 
   if (ev.key === 'Enter' || ev.key === ' ') {
-    const v = events.value[stelle.value]
-    if (v) waehlen(v)
+    const v = events.value[index.value]
+    if (v) choose(v)
     ev.preventDefault()
   }
 }
@@ -264,10 +264,10 @@ function taste(ev: KeyboardEvent) {
  * beginnt oder endet), nicht im Sekundentakt. Häufiger wäre Last ohne
  * Gewinn, seltener hiesse, dass jemand vor einem Gerät steht und wartet.
  */
-let uhr: ReturnType<typeof setInterval> | null = null
+let timer: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
-  const merk = gemerkt()
+  const savedId = remembered()
 
   /*
    * KEINE FRISCHE ANTWORT — WEDER BESTÄTIGT NOCH WIDERLEGT.
@@ -281,20 +281,20 @@ onMounted(() => {
    * niemand gefragt werden konnte. Das Gerät verlöre seine Zuordnung wegen
    * eines Netzausfalls, den es doch gerade übersteht.
    */
-  const keineAuskunft = error.value != null
-  const steht = merk !== null && events.value.some(v => v.id === merk)
+  const noAnswer = error.value != null
+  const stillListed = savedId !== null && events.value.some(v => v.id === savedId)
 
-  if (!wechselwunsch.value && merk !== null && (steht || keineAuskunft)) {
+  if (!wantsSwitch.value && savedId !== null && (stillListed || noAnswer)) {
     // `replace`: ohne das läge diese Seite im Verlauf, und die Zurück-Taste
     // landete auf ihr — die sofort wieder wegspringt. Eine Schleife, aus der
     // auf einem Gerät ohne Tastatur niemand herauskommt.
     //
-    // Ohne Netz (`keineAuskunft`) ist dieser Sprung ein VERTRAUENSVORSCHUSS:
+    // Ohne Netz (`noAnswer`) ist dieser Sprung ein VERTRAUENSVORSCHUSS:
     // die Zielseite selbst weiss, wie sie sich ohne Antwort verhält (siehe
     // dort, dieselbe Unterscheidung), und ein Gerät, das an seiner
     // Veranstaltung bleibt, ist die bessere Auskunft als eine Liste, die
     // mangels Netz ohnehin leer wäre.
-    navigateTo(`/board/${merk}`, { replace: true })
+    navigateTo(`/board/${savedId}`, { replace: true })
     return
   }
 
@@ -305,28 +305,28 @@ onMounted(() => {
    * Jahr, und beim Wechsel zurück dorthin (Liste, gleicher Name, neues Jahr)
    * hinge daran eine Kennung, die niemand mehr nachvollziehen kann.
    *
-   * NUR MIT EINER ECHTEN, ERFOLGREICHEN ANTWORT (`!keineAuskunft`): ein
+   * NUR MIT EINER ECHTEN, ERFOLGREICHEN ANTWORT (`!noAnswer`): ein
    * Netzfehler ist kein Beleg dafür, dass die Veranstaltung vorbei ist,
    * siehe oben.
    *
    * Nicht beim Wechselwunsch: wer nur nachsehen will, was sonst noch läuft,
    * und es sich anders überlegt, soll sein Gerät unverändert vorfinden.
    */
-  if (!wechselwunsch.value && merk !== null && !steht && !keineAuskunft) {
+  if (!wantsSwitch.value && savedId !== null && !stillListed && !noAnswer) {
     try {
-      window.localStorage.removeItem(merkschluessel)
+      window.localStorage.removeItem(storageKey)
     }
     catch { /* kein Speicher, nichts zu vergessen */ }
   }
 
-  window.addEventListener('keydown', taste)
-  freigabeHolen()
-  uhr = setInterval(() => refresh(), 120_000)
+  window.addEventListener('keydown', onKey)
+  fetchGrant()
+  timer = setInterval(() => refresh(), 120_000)
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('keydown', taste)
-  if (uhr) clearInterval(uhr)
+  window.removeEventListener('keydown', onKey)
+  if (timer) clearInterval(timer)
 })
 
 /* ------------------------------------------------------------------------
@@ -340,22 +340,22 @@ onBeforeUnmount(() => {
  * Teil: wer davor steht, will wissen, ob das die Veranstaltung ist, an der
  * er gerade arbeitet — nicht das Datum abschreiben.
  */
-function zeitraum(von: string, bis: string): string {
-  const a = new Date(`${von}T00:00:00`)
-  const b = new Date(`${bis}T00:00:00`)
+function dateRange(from: string, to: string): string {
+  const a = new Date(`${from}T00:00:00`)
+  const b = new Date(`${to}T00:00:00`)
   if (Number.isNaN(a.valueOf())) return ''
 
-  const monat = (d: Date) => d.toLocaleDateString('en-GB', { month: 'short' })
-  if (Number.isNaN(b.valueOf()) || von === bis) {
-    return `${a.getDate()} ${monat(a)} ${a.getFullYear()}`
+  const month = (d: Date) => d.toLocaleDateString('en-GB', { month: 'short' })
+  if (Number.isNaN(b.valueOf()) || from === to) {
+    return `${a.getDate()} ${month(a)} ${a.getFullYear()}`
   }
   if (a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear()) {
-    return `${a.getDate()}–${b.getDate()} ${monat(b)} ${b.getFullYear()}`
+    return `${a.getDate()}–${b.getDate()} ${month(b)} ${b.getFullYear()}`
   }
-  return `${a.getDate()} ${monat(a)} – ${b.getDate()} ${monat(b)} ${b.getFullYear()}`
+  return `${a.getDate()} ${month(a)} – ${b.getDate()} ${month(b)} ${b.getFullYear()}`
 }
 
-function ort(v: BoardEventItem): string {
+function place(v: BoardEventItem): string {
   return [v.city, v.country].filter(Boolean).join(', ')
 }
 
@@ -390,9 +390,9 @@ useHead({
         An event appears here two days before it starts, and stays until the
         day after it ends.
       </p>
-      <p v-if="naechste" class="pick__hint-next">
-        Next: <strong>{{ naechste.name }}</strong>
-        · {{ zeitraum(naechste.startDate, naechste.endDate) }}
+      <p v-if="next" class="pick__hint-next">
+        Next: <strong>{{ next.name }}</strong>
+        · {{ dateRange(next.startDate, next.endDate) }}
       </p>
       <p class="pick__hint-text pick__hint-text--klein">
         This screen checks again on its own. Leave it running.
@@ -406,20 +406,20 @@ useHead({
         type="button"
         class="pick__event-card"
         :class="{
-          'pick__event-card--on': i === stelle,
-          'pick__event-card--oeffnet': oeffnet === v.id,
+          'pick__event-card--on': i === index,
+          'pick__event-card--oeffnet': opening === v.id,
         }"
-        :aria-busy="oeffnet === v.id"
-        @click="waehlen(v)"
-        @mouseenter="stelle = i"
+        :aria-busy="opening === v.id"
+        @click="choose(v)"
+        @mouseenter="index = i"
       >
         <span class="pick__index" aria-hidden="true">{{ i + 1 }}</span>
 
         <span class="pick__lines">
           <span class="pick__name">{{ v.name }}</span>
           <span class="pick__meta">
-            <span class="pick__dates">{{ zeitraum(v.startDate, v.endDate) }}</span>
-            <span v-if="ort(v)" class="pick__place">· {{ ort(v) }}</span>
+            <span class="pick__dates">{{ dateRange(v.startDate, v.endDate) }}</span>
+            <span v-if="place(v)" class="pick__place">· {{ place(v) }}</span>
           </span>
         </span>
 
@@ -429,10 +429,10 @@ useHead({
         -->
         <span class="pick__marks">
           <span v-if="v.running" class="pick__running">live</span>
-          <span v-if="zaehltBei === v.id" class="pick__mine">this screen counts here</span>
+          <span v-if="countsAt === v.id" class="pick__mine">this screen counts here</span>
         </span>
 
-        <span v-if="oeffnet === v.id" class="pick__laeuft" aria-hidden="true" />
+        <span v-if="opening === v.id" class="pick__laeuft" aria-hidden="true" />
       </button>
     </main>
 

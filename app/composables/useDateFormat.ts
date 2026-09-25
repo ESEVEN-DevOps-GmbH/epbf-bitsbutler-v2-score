@@ -20,7 +20,7 @@
  * clientseitig die des Tablets an der Wand. Beide sind für die Tafel dieselbe
  * Auskunft, weil sie in derselben Halle stehen.
  */
-function geraeteZeitzone(): string {
+function deviceTimeZone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone
   }
@@ -31,7 +31,7 @@ function geraeteZeitzone(): string {
 
 export function useDateFormat() {
   const locale = 'en-GB'
-  const timeZone = geraeteZeitzone()
+  const timeZone = deviceTimeZone()
 
   /**
    * Zonenversatz auf die Form bringen, die `new Date` versteht.
@@ -47,12 +47,12 @@ export function useDateFormat() {
    * unangetastet: "Z", "+02:00" und reine Datumsangaben gehen unverändert
    * durch.
    */
-  const OFFSET_OHNE_MINUTEN = /([+-]\d{2})$/
+  const OFFSET_WITHOUT_MINUTES = /([+-]\d{2})$/
 
   const parse = (iso: string | null | undefined): Date | null => {
     if (!iso) return null
-    const wert = iso.includes('T') ? iso.replace(OFFSET_OHNE_MINUTEN, '$1:00') : iso
-    const d = new Date(wert)
+    const value = iso.includes('T') ? iso.replace(OFFSET_WITHOUT_MINUTES, '$1:00') : iso
+    const d = new Date(value)
     return Number.isNaN(d.getTime()) ? null : d
   }
 

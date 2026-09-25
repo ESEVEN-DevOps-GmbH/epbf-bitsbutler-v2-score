@@ -20,20 +20,20 @@ export default defineEventHandler(async (event) => {
    * Bildschirm in der Halle hat sie einmal bekommen, jeder andere kann
    * hineinschreiben, was er will.
    */
-  const roh = String(getRouterParam(event, 'number') ?? '')
-  const nummer = Number.parseInt(roh, 10)
-  if (!/^[0-9]{1,3}$/.test(roh) || nummer < 1) {
+  const raw = String(getRouterParam(event, 'number') ?? '')
+  const tableNumber = Number.parseInt(raw, 10)
+  if (!/^[0-9]{1,3}$/.test(raw) || tableNumber < 1) {
     throw createError({ statusCode: 400, statusMessage: 'Keine Tischnummer' })
   }
 
-  const basis = String(process.env.BB_API ?? '')
-  if (!basis) {
+  const base = String(process.env.BB_API ?? '')
+  if (!base) {
     throw createError({ statusCode: 503, statusMessage: 'Scoring not reachable' })
   }
 
-  const tafel = await getTableBoard(basis, String(process.env.BB_SITE ?? ''), id, nummer)
-  if (!tafel) {
+  const board = await getTableBoard(base, String(process.env.BB_SITE ?? ''), id, tableNumber)
+  if (!board) {
     throw createError({ statusCode: 404, statusMessage: 'Veranstaltung nicht gefunden' })
   }
-  return tafel
+  return board
 })

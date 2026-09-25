@@ -1,13 +1,13 @@
 import type { Match } from '~~/shared/types/api'
 
 /** Eine Seite der Partie. A steht auf der Tafel links, B rechts. */
-export type Seite = 'A' | 'B'
+export type Side = 'A' | 'B'
 
 /** Der Stand beider Seiten — immer beide, nie einer allein. */
-export interface Standpaar { A: number, B: number }
+export interface ScorePair { A: number, B: number }
 
 /** Wie viele Kugeln ein volles Rack hat. Die Zahl steht in WPA 7 ueberall. */
-export const VOLLES_RACK = 15
+export const FULL_RACK = 15
 
 /**
  * WELCHES FOUL AM TISCH GEDRUECKT WURDE — die BEDIENUNG und nicht die Regel.
@@ -18,9 +18,9 @@ export const VOLLES_RACK = 15
  * 7.11). Was sie unterscheidet, ist WER DANACH AM TISCH STEHT, und das ist
  * die Wahl des Gegners nach 7.3 (b) — eine Angabe ueber den Tisch und nicht
  * ueber das Foul. Deshalb bleibt sie hier vorn und reist nicht mit:
- * `foulart` an die Anwendung ist in beiden Faellen 'BREAK'.
+ * `foulKind` an die Anwendung ist in beiden Faellen 'BREAK'.
  */
-export type Foulgriff = 'STANDARD' | 'BREAK_AGAIN' | 'BREAK_ACCEPT'
+export type FoulKind = 'STANDARD' | 'BREAK_AGAIN' | 'BREAK_ACCEPT'
 
 /**
  * DIE LAGE AM TISCH BEI 14.1 ENDLOS — was neben dem Stand noch gilt.
@@ -38,15 +38,15 @@ export type Foulgriff = 'STANDARD' | 'BREAK_AGAIN' | 'BREAK_ACCEPT'
  *           Pool die wichtigste Zustandsangabe ueberhaupt und gehoert
  *           deshalb auf die Tafel und nicht in ein Untermenue.
  *
- * WER AM TISCH IST, STEHT NICHT HIER. Er steht in `anstossStand.next` —
+ * WER AM TISCH IST, STEHT NICHT HIER. Er steht in `breakState.next` —
  * dieselbe Auskunft, die die Tafel ohnehin fuehrt und vorwegnimmt. Bei 14.1
  * wird einmal angestossen und danach gespielt, bis jemand verschiesst; wer
  * als naechstes zum Stoss kommt, IST der, der am Tisch steht. Eine zweite
  * Angabe daneben waere ein zweiter Schattenzustand fuer dieselbe Sache.
  */
-export interface Lage {
+export interface TableState {
   rest: number
-  fouls: Standpaar
+  fouls: ScorePair
   /**
    * DIE LAUFENDE AUFNAHME je Seite — wie viele Kugeln der Spieler
    * hintereinander legal versenkt hat, ohne dass der Tisch zwischendurch
@@ -64,7 +64,7 @@ export interface Lage {
    * nur die eine Zahl, müsste beim Zurücknehmen geraten werden, wem sie
    * gehörte. Die Seite, die nicht am Tisch ist, trägt 0.
    */
-  lauf: Standpaar
+  run: ScorePair
   /**
    * DER HIGH RUN je Seite — die höchste Aufnahme dieser Partie.
    *
@@ -73,25 +73,25 @@ export interface Lage {
    * gehoben hat, müsste wissen, ob davor 38 oder 12 dastand — und das steht
    * nirgends ausser im Verlaufsstapel dieses Geräts.
    */
-  high: Standpaar
+  high: ScorePair
 }
 
 /**
  * Ein Schritt im Rueckgaengig-Stapel — der GANZE Zustand und nicht nur der
  * Stand.
  *
- * Bis zum 16.09.2026 lag hier ein blosses {@link Standpaar}, und das genuegte,
+ * Bis zum 16.09.2026 lag hier ein blosses {@link ScorePair}, und das genuegte,
  * solange eine Zahl das Einzige war, was ein Tastendruck veraenderte. Bei
  * 14.1 endlos veraendert er vier Dinge auf einmal: Punkte, Restkugeln,
  * Foulzaehler und wer am Tisch ist. Ein Undo, das nur die Punkte zuruecknimmt,
  * laesst den Rest stehen — und die naechste Aufnahme rechnet dann falsch,
  * ohne dass jemand sieht, warum.
  */
-interface Schritt {
-  stand: Standpaar
-  lage: Lage
+interface Step {
+  score: ScorePair
+  tableState: TableState
   /** Wer am Tisch war. `null` bei Satzwertung — dort gibt es das nicht. */
-  amTisch: Seite | null
+  atTable: Side | null
   /**
    * War der Vorgang, der auf diesen Zustand FOLGTE, ein Foul?
    *
@@ -102,33 +102,33 @@ interface Schritt {
    * dafür in ScoreUndoTest). Nur zusammen mit dieser Angabe zeichnet der
    * Verlauf ihn als Rücknahme.
    */
-  foulart?: 'STANDARD' | 'BREAK' | 'THIRD'
+  foulKind?: 'STANDARD' | 'BREAK' | 'THIRD'
 }
 
 /**
  * Was ein Tastendruck bei 14.1 endlos NEBEN dem Stand mitschickt.
  *
- * `foulart` ist keine Angabe über den Stand, sondern über den Vorgang —
+ * `foulKind` ist keine Angabe über den Stand, sondern über den Vorgang —
  * dieselbe Bauart wie `undo` und aus demselben Grund: die Anwendung sieht
  * sonst nur, dass eine Zahl gefallen ist, und ein Foul stünde im Verlauf als
  * „Score corrected" da. Drei Werte, weil die drei Fouls Verschiedenes kosten
  * (WPA 7.9 / 7.10 / 7.11) und sich an der Differenz allein nicht sicher
  * auseinanderhalten lassen.
  */
-interface Vierzehnfassung {
-  lage: Lage
-  amTisch: Seite
-  foulart?: 'STANDARD' | 'BREAK' | 'THIRD'
+interface StraightPoolMove {
+  tableState: TableState
+  atTable: Side
+  foulKind?: 'STANDARD' | 'BREAK' | 'THIRD'
 }
 
 /**
  * Was `PUT /matches/{id}/score` beantwortet — einmal benannt, weil sowohl
- * `setzen` als auch die Netzwiederholung bei einem Merkposten (siehe
- * `merkposten` in `useZaehlwerk`) dieselbe Form brauchen: ein Wiederholungs-
+ * `setScore` als auch die Netzwiederholung bei einem Merkposten (siehe
+ * `pending` in `useScoring`) dieselbe Form brauchen: ein Wiederholungs-
  * versuch schickt denselben Rumpf ein zweites Mal und erwartet dieselbe
  * Antwort.
  */
-interface StandAntwort {
+interface ScoreResponse {
   scoreA: number, scoreB: number
   ballsOnTable?: number | null, foulsA?: number | null, foulsB?: number | null
   runA?: number | null, highA?: number | null
@@ -138,12 +138,12 @@ interface StandAntwort {
 /**
  * Ein Schreibvorgang auf den Stand, so vollständig, dass er sich UNVERÄNDERT
  * wiederholen lässt — der Rumpf, was bei Ankunft geschieht, und was bei
- * einer (fachlichen) Abweisung zurückzudrehen ist. Siehe `merkposten`.
+ * einer (fachlichen) Abweisung zurückzudrehen ist. Siehe `pending`.
  */
-interface StandAuftrag {
-  was: () => Promise<StandAntwort>
-  angekommen: (antwort: StandAntwort) => void
-  zurueckdrehen: () => void
+interface ScoreRequest {
+  run: () => Promise<ScoreResponse>
+  onArrived: (response: ScoreResponse) => void
+  rollback: () => void
 }
 
 /**
@@ -154,53 +154,53 @@ interface StandAuftrag {
  * Speicher auf, das Gerät geht kurz aus — und danach ist der ganze
  * Zustand dieser Datei weg, lautlos, ohne dass irgendwer es sieht. Deshalb
  * liegt hier ab, WAS zu tun ist, wenn die Verbindung zurück ist — nicht
- * mehr, denn Funktionen (`was`, `angekommen`, `zurueckdrehen` von
- * `StandAuftrag`) lassen sich nicht in `localStorage` schreiben.
+ * mehr, denn Funktionen (`run`, `onArrived`, `rollback` von
+ * `ScoreRequest`) lassen sich nicht in `localStorage` schreiben.
  *
- * EIN SCHLÜSSEL JE PARTIE (`merkpostenSchluessel`), damit zwei Tafeln auf
+ * EIN SCHLÜSSEL JE PARTIE (`pendingStorageKey`), damit zwei Tafeln auf
  * demselben Gerät sich nicht ins Gehege kommen und ein gemerktes Ende einen
  * gemerkten Stand am selben Schlüssel ERSETZT statt daneben abzulegen —
  * dieselbe Haltung wie beim Merkposten im Arbeitsspeicher (siehe dort,
  * "EIN GEMERKTES ERGEBNIS ERSETZT EINEN GEMERKTEN STAND").
  */
-type GespeicherterMerkposten = GespeicherterStand | GespeichertesEnde
+type StoredPending = StoredScore | StoredResult
 
-/** Ein Stand, der noch hinaus muss — siehe `merkposten` in `useZaehlwerk`. */
-interface GespeicherterStand {
-  art: 'stand'
+/** Ein Stand, der noch hinaus muss — siehe `pending` in `useScoring`. */
+interface StoredScore {
+  kind: 'score'
   /**
    * Der Stand, AUF DEM dieser Merkposten aufbaute — nicht der, den er
    * schickt. Die Grundlage des Abgleichs beim Wiederlesen, siehe
-   * `merkpostenWiederherstellen`: eine absolute Zahl sagt für sich nicht,
+   * `pendingRestore`: eine absolute Zahl sagt für sich nicht,
    * worauf sie aufbaute, und ohne diese Angabe ließe sich nicht erkennen,
    * ob der Server inzwischen etwas anderes führt.
    */
-  basis: Standpaar
-  neu: Standpaar
-  ruecknahme: boolean
-  vierzehn?: Vierzehnfassung
+  base: ScorePair
+  next: ScorePair
+  undo: boolean
+  move?: StraightPoolMove
 }
 
-/** Ein Ende (`beenden`/`aufgeben`), das noch hinaus muss. */
-interface GespeichertesEnde {
-  art: 'ende'
-  pfad: 'confirm' | 'result'
+/** Ein Ende (`finish`/`giveUp`), das noch hinaus muss. */
+interface StoredResult {
+  kind: 'result'
+  path: 'confirm' | 'result'
   /**
-   * Nur bei `pfad: 'result'` gesetzt — `confirm` hat keinen Rumpf, siehe
-   * `beenden`.
+   * Nur bei `path: 'result'` gesetzt — `confirm` hat keinen Rumpf, siehe
+   * `finish`.
    */
-  rumpf?: {
-    winner: Seite, scoreA: number, scoreB: number
+  body?: {
+    winner: Side, scoreA: number, scoreB: number
     resolution: 'WALKOVER' | 'FORFEIT'
   }
   /**
-   * Der Stand, auf dem `rumpf.scoreA`/`scoreB` beruhen — wie `basis` bei
-   * {@link GespeicherterStand}, und aus demselben Grund. `null` bei
+   * Der Stand, auf dem `body.scoreA`/`scoreB` beruhen — wie `base` bei
+   * {@link StoredScore}, und aus demselben Grund. `null` bei
    * WALKOVER: dort steht im Rumpf immer 0:0, unabhängig vom tatsächlichen
    * Stand, und ein Vergleich gegen "0:0" wäre kein Abgleich, sondern ein
    * Zufallstreffer.
    */
-  basis: Standpaar | null
+  base: ScorePair | null
 }
 
 /**
@@ -208,7 +208,7 @@ interface GespeichertesEnde {
  * die nächste Partie an diesem Tisch soll den Merkposten der vorigen weder
  * erben noch sehen.
  */
-function merkpostenSchluessel(matchId: string): string {
+function pendingStorageKey(matchId: string): string {
   return `bb.score.pending.${matchId}`
 }
 
@@ -223,28 +223,28 @@ function merkpostenSchluessel(matchId: string): string {
  * darauf wirft dann eine `ReferenceError`, die hier genauso geschluckt
  * wird.
  */
-function merkpostenSpeichern(matchId: string, wert: GespeicherterMerkposten) {
+function pendingSave(matchId: string, value: StoredPending) {
   try {
-    window.localStorage.setItem(merkpostenSchluessel(matchId), JSON.stringify(wert))
+    window.localStorage.setItem(pendingStorageKey(matchId), JSON.stringify(value))
   }
   catch {
     // Kein Speicher — siehe oben.
   }
 }
 
-function merkpostenGelesen(matchId: string): GespeicherterMerkposten | null {
+function pendingRead(matchId: string): StoredPending | null {
   try {
-    const roh = window.localStorage.getItem(merkpostenSchluessel(matchId))
-    return roh ? JSON.parse(roh) as GespeicherterMerkposten : null
+    const raw = window.localStorage.getItem(pendingStorageKey(matchId))
+    return raw ? JSON.parse(raw) as StoredPending : null
   }
   catch {
     return null
   }
 }
 
-function merkpostenGeloescht(matchId: string) {
+function pendingClear(matchId: string) {
   try {
-    window.localStorage.removeItem(merkpostenSchluessel(matchId))
+    window.localStorage.removeItem(pendingStorageKey(matchId))
   }
   catch {
     // Kein Speicher — siehe oben.
@@ -255,8 +255,8 @@ function merkpostenGeloescht(matchId: string) {
  * Eine Seite, deren Trikotkontrolle noch aussteht — mit dem Namen dessen,
  * der dort steht. Genau das, was `competition.uniform_blocks_start` liefert.
  */
-export interface Trikotoffen {
-  side: Seite
+export interface UniformOpen {
+  side: Side
   displayName: string
 }
 
@@ -292,14 +292,14 @@ export interface ShotClock {
  * Was die Verwaltung zusätzlich über die Partie weiß und die öffentliche
  * Tafelantwort nicht führt. Null, solange niemand angemeldet ist.
  */
-export interface Zusatz {
+export interface Extra {
   id: string
   status: string
   raceTo: number | null
-  firstBreak: Seite | null
-  nextBreak: Seite | null
+  firstBreak: Side | null
+  nextBreak: Side | null
   breakRule: string | null
-  timeoutsTaken: Standpaar
+  timeoutsTaken: ScorePair
   /** Wie viele jede Seite HAT. null heisst: keine Obergrenze gepflegt. */
   timeoutsAllowed: number | null
   /**
@@ -308,26 +308,26 @@ export interface Zusatz {
    * Die beiden nebeneinander zu haben ist der ganze Grund, aus dem die
    * Auszeit jetzt vorweggenommen werden kann: bis zum 14.09.2026 kannte
    * dieses Gerät nur `timeoutsAllowed`, und mit einer ANZAHL lässt sich
-   * keine Uhr stellen. Siehe `auszeit`.
+   * keine Uhr stellen. Siehe `takeTimeout`.
    *
    * null heisst: die Dauer ist nicht bekannt — dann wird NICHT
    * vorweggenommen, statt eine Restzeit zu erfinden.
    */
   timeoutSeconds: number | null
-  score: Standpaar
+  score: ScorePair
   /**
    * Wessen Trikotkontrolle noch offen ist. Leer heisst: die Partie darf
    * beginnen.
    *
    * <p>KEIN FEHLER, SONDERN EIN ZUSTAND — und deshalb steht sie hier bei
-   * `raceTo` und `timeoutsAllowed` und nicht bei {@link Zaehlfehler}. Eine
+   * `raceTo` und `timeoutsAllowed` und nicht bei {@link ScoringError}. Eine
    * Abweisung beantwortet den Druck, der gerade danebenging, und
-   * verschwindet nach fünfzehn Sekunden von selbst (FEHLER_MS). Diese
+   * verschwindet nach fünfzehn Sekunden von selbst (REJECTION_MS). Diese
    * Angabe beantwortet keinen Druck: sie steht am Tisch, bis jemand die
    * Kontrolle abnimmt, und sie geht auch nur dann — dann nämlich liefert
    * der nächste Abruf sie nicht mehr mit.
    */
-  uniformOpen: Trikotoffen[]
+  uniformOpen: UniformOpen[]
   /*
    * HIER STAND `uniformControl` — "führt dieses Turnier überhaupt eine
    * Trikotkontrolle?".
@@ -355,22 +355,22 @@ export interface Zusatz {
    * Wie viele Objektkugeln bei 14.1 endlos noch auf dem Tisch liegen.
    *
    * <p>`null` heisst „noch nichts gezaehlt" und NICHT „der Tisch ist leer" —
-   * die Tafel faellt dann auf {@link VOLLES_RACK} zurueck, denn so beginnt
+   * die Tafel faellt dann auf {@link FULL_RACK} zurueck, denn so beginnt
    * jede Partie. Bei Satzwertung bleibt die Angabe immer null.
    */
   ballsOnTable: number | null
   /** Standardfouls hintereinander, je Seite (WPA 7.11). */
-  fouls: Standpaar
-  /** Die laufende Aufnahme, je Seite — siehe {@link Lage}. */
-  lauf: Standpaar
+  fouls: ScorePair
+  /** Die laufende Aufnahme, je Seite — siehe {@link TableState}. */
+  run: ScorePair
   /** Der High run, je Seite. */
-  high: Standpaar
+  high: ScorePair
 }
 
 /** Eine abgewiesene Eingabe, so wie sie am Gerät stehen soll. */
-export interface Zaehlfehler {
+export interface ScoringError {
   /** Der Schlüssel der Anwendung, z. B. MATCH_FINISHED_NO_SCORE. */
-  schluessel: string
+  errorCode: string
   text: string
 }
 
@@ -398,10 +398,10 @@ export interface Zaehlfehler {
  *
  * Jetzt zeigt die Tafel den neuen Stand sofort und schickt ihn danebenher.
  * Der alte Einwand ist damit nicht weggefallen, sondern beantwortet: ein
- * Stand, der noch unterwegs ist, SIEHT anders aus (`unbestaetigt`), und wird
+ * Stand, der noch unterwegs ist, SIEHT anders aus (`unconfirmed`), und wird
  * er abgewiesen, springt die Zahl zurück und die rote Zeile sagt warum.
  *
- * ZWEITENS: ANTWORTEN KOMMEN IN FALSCHER REIHENFOLGE — siehe `losschicken`.
+ * ZWEITENS: ANTWORTEN KOMMEN IN FALSCHER REIHENFOLGE — siehe `send`.
  * Das ist der Kern dieses Stücks und steht dort ausführlich.
  *
  * DRITTENS: NICHT JEDER WEG NIMMT VORWEG
@@ -410,8 +410,8 @@ export interface Zaehlfehler {
  * reicht den Turnierbaum weiter und rechnet Plätze ab — das ist kein Tipp,
  * den man zurücknimmt, und eine Fläche, die dabei sofort "fertig" sagt und
  * eine Sekunde später doch nicht, ist schlimmer als eine, die kurz wartet.
- * `beenden` und `aufgeben` gehen deshalb weiter durch {@link schreiben} und
- * halten die Leiste an; alles andere geht durch {@link losschicken}.
+ * `finish` und `giveUp` gehen deshalb weiter durch {@link write} und
+ * halten die Leiste an; alles andere geht durch {@link send}.
  *
  * VIERTENS: DER EIGENE STAND WIRD GEHALTEN, BIS DER ABRUF IHN BESTÄTIGT
  *
@@ -428,9 +428,9 @@ export interface Zaehlfehler {
  * sieht dann eine fremde Änderung — das ist richtig, denn er ist nicht der
  * Einzige, der schreiben darf.
  */
-export function useZaehlwerk(optionen: {
-  partie: Ref<Match | null>
-  zusatz: Ref<Zusatz | null>
+export function useScoring(optionen: {
+  match: Ref<Match | null>
+  extra: Ref<Extra | null>
   /**
    * Was der ABRUF über die laufenden Auszeiten sagt — je Seite ein Ja oder
    * Nein, roh und ohne das, was hier vorweggenommen wurde.
@@ -440,7 +440,7 @@ export function useZaehlwerk(optionen: {
    * die den Vorgriff schon enthält, bestätigte sich der Vorgriff selbst und
    * würde nie wieder los.
    */
-  auszeitenLaufen: Ref<Record<Seite, boolean>>
+  timeoutsRunning: Ref<Record<Side, boolean>>
   /**
    * Ist es 14.1 endlos?
    *
@@ -466,8 +466,8 @@ export function useZaehlwerk(optionen: {
    * set_score` und NICHT nach `match_slot.score` — dieselbe absolute Zahl,
    * nur eine Ebene tiefer (`MatchController.setScore`, seit dem
    * 24.09.2026). `score` zaehlt dann die GEWONNENEN Saetze und steigt
-   * ausschliesslich ueber `satzAbschliessen`. Ohne diese Angabe rechnete
-   * `stand` weiterhin gegen `sideX.score` — und das waere fuer eine
+   * ausschliesslich ueber `finishSet`. Ohne diese Angabe rechnete
+   * `score` weiterhin gegen `sideX.score` — und das waere fuer eine
    * Satzpartie der AUSSENSTAND (z. B. "1" gewonnener Satz), nicht der Stand
    * IM laufenden Satz (z. B. "3:2" Racks). Der Zifferblock zaehlte dann
    * sichtbar falsch, sobald der Abruf den optimistischen Vorgriff ablöst.
@@ -482,42 +482,42 @@ export function useZaehlwerk(optionen: {
    * hat keinen Zwischenstand, den dieses Zaehlwerk fuehren koennte; die
    * Ballwerte-Flaeche zaehlt ihn eigenstaendig und ausserhalb dieser Datei.
    */
-  satzformat: Ref<boolean>
-  /** Die ganze Tafel neu holen. NIE abwartend — siehe `losschicken`. */
-  nachschauen: () => Promise<void>
+  setFormat: Ref<boolean>
+  /** Die ganze Tafel neu holen. NIE abwartend — siehe `send`. */
+  refresh: () => Promise<void>
 }) {
-  const { partie, zusatz, auszeitenLaufen, straightPool, satzformat, nachschauen } = optionen
+  const { match, extra, timeoutsRunning, straightPool, setFormat, refresh } = optionen
 
   /**
    * Ein AUFHALTENDER Vorgang läuft — und nur ein solcher.
    *
    * Sie sperrt jede Fläche der Leiste (`:arbeitet`), und genau deshalb trägt
-   * sie seit dem 14.09.2026 nur noch, was ein Ende meldet: `beenden` und
-   * `aufgeben`. Punkt, Auszeit und Anstoß sperren nichts mehr — wer zweimal
+   * sie seit dem 14.09.2026 nur noch, was ein Ende meldet: `finish` und
+   * `giveUp`. Punkt, Auszeit und Anstoß sperren nichts mehr — wer zweimal
    * schnell tippt, muss zweimal zählen können, und das war der Auftrag.
    */
-  const laeuft = ref(false)
-  const { fehler, melden, abweisen } = useAbweisung()
+  const busy = ref(false)
+  const { error, report, reject } = useRejection()
 
   /** Der zuletzt BESTÄTIGTE eigene Stand samt Zeitpunkt — siehe Kopf. */
-  const gehalten = ref<{ stand: Standpaar, seit: number } | null>(null)
+  const held = ref<{ score: ScorePair, since: number } | null>(null)
 
   /**
    * Der eigene Stand, der noch unterwegs ist — die Zahl, die sofort hochging.
    *
-   * Er steht über allem: über dem Abruf und über `gehalten`. Solange er
+   * Er steht über allem: über dem Abruf und über `held`. Solange er
    * gesetzt ist, kann weder der Zehn-Sekunden-Takt noch eine überholte
    * Antwort die Zahl bewegen, auf die der Zählende gerade geschaut hat.
    *
-   * Er braucht KEINE eigene Verfallsfrist, obwohl `gehalten` eine hat. Der
-   * Grund liegt in SENDEFRIST_MS: jeder Schreibvorgang endet spätestens nach
+   * Er braucht KEINE eigene Verfallsfrist, obwohl `held` eine hat. Der
+   * Grund liegt in SEND_DEADLINE_MS: jeder Schreibvorgang endet spätestens nach
    * acht Sekunden, mit Antwort oder mit Abbruch, und genau dort wird er
    * gelöscht. Eine zweite Frist hier wäre eine zweite Wahrheit über
    * dieselbe Sache — und die beiden liefen früher oder später auseinander.
    */
-  const vorgemerkt = ref<Standpaar | null>(null)
+  const optimistic = ref<ScorePair | null>(null)
 
-  const HALTEDAUER_MS = 20_000
+  const HOLD_MS = 20_000
 
   /**
    * Wie lange ein Schreibvorgang höchstens unterwegs sein darf.
@@ -533,7 +533,7 @@ export function useZaehlwerk(optionen: {
    * deutlich unter den fünfzehn, die die Meldung danach stehenbleibt — der
    * Abbruch und sein roter Satz gehören noch zu demselben Tastendruck.
    */
-  const SENDEFRIST_MS = 8_000
+  const SEND_DEADLINE_MS = 8_000
 
   /**
    * WIE EIN NOCH NICHT BESTÄTIGTER STAND AUSSIEHT — und warum er es erst
@@ -545,7 +545,7 @@ export function useZaehlwerk(optionen: {
    * wird eine Spur blasser, und der Verbindungspunkt unten rechts wechselt
    * die Farbe (siehe [table].vue).
    *
-   * ES BEGINNT ABER NICHT SOFORT, SONDERN NACH WIMPERNSCHLAG_MS. Im Saal
+   * ES BEGINNT ABER NICHT SOFORT, SONDERN NACH BLINK_MS. Im Saal
    * läuft das über ein örtliches Netz und ein Schreibvorgang dauert dreißig
    * Millisekunden — flackerte die Anzeige bei jedem Tipp kurz auf, wäre das
    * genau das Zucken, wegen dessen die Vorwegnahme früher abgelehnt wurde,
@@ -556,27 +556,27 @@ export function useZaehlwerk(optionen: {
    * eine Bewegung auf einer Tafel zieht aus fünf Metern mehr Blicke auf sich
    * als der Satzstand daneben.
    */
-  const WIMPERNSCHLAG_MS = 600
-  const unbestaetigt = ref(false)
-  let wimpernUhr: ReturnType<typeof setTimeout> | null = null
+  const BLINK_MS = 600
+  const unconfirmed = ref(false)
+  let blinkTimer: ReturnType<typeof setTimeout> | null = null
 
-  function wartenBeginnt() {
-    if (wimpernUhr || unbestaetigt.value) return
-    wimpernUhr = setTimeout(() => {
-      unbestaetigt.value = true
-      wimpernUhr = null
-    }, WIMPERNSCHLAG_MS)
+  function beginWaiting() {
+    if (blinkTimer || unconfirmed.value) return
+    blinkTimer = setTimeout(() => {
+      unconfirmed.value = true
+      blinkTimer = null
+    }, BLINK_MS)
   }
 
-  function wartenEndet() {
-    if (wimpernUhr) { clearTimeout(wimpernUhr); wimpernUhr = null }
-    unbestaetigt.value = false
+  function endWaiting() {
+    if (blinkTimer) { clearTimeout(blinkTimer); blinkTimer = null }
+    unconfirmed.value = false
   }
 
-  // Die Uhr der roten Zeile raeumt `useAbweisung` selbst ab — sie gehoert
+  // Die Uhr der roten Zeile raeumt `useRejection` selbst ab — sie gehoert
   // seit dem 16.09.2026 dorthin und nicht mehr hierher.
   onScopeDispose(() => {
-    if (wimpernUhr) clearTimeout(wimpernUhr)
+    if (blinkTimer) clearTimeout(blinkTimer)
   })
 
   /* ----------------------------------------------------------------------
@@ -585,13 +585,13 @@ export function useZaehlwerk(optionen: {
    *
    * Der Auftrag vom 25.09.2026: die Tafel soll weiterzählen, wenn das Netz
    * in der Halle ausfällt, und den Stand nachholen, sobald die Verbindung
-   * zurück ist. `vorgemerkt` darüber löst das für einen Aussetzer von ein
+   * zurück ist. `optimistic` darüber löst das für einen Aussetzer von ein
    * paar Sekunden schon; es löst es nicht für einen Ausfall von Minuten,
-   * denn `losschicken` gab bis hierher jeden gescheiterten Schreibvorgang
+   * denn `send` gab bis hierher jeden gescheiterten Schreibvorgang
    * verloren — gleich, OB die Anwendung nein gesagt hat oder ob sie die
    * Frage nie zu Gesicht bekam.
    *
-   * GENAU DIESE ZWEI FÄLLE WERDEN JETZT GETRENNT (`istNetzfehler`, am Ende
+   * GENAU DIESE ZWEI FÄLLE WERDEN JETZT GETRENNT (`isNetworkError`, am Ende
    * der Datei, wo `alsFehler` dieselbe Antwort schon zerlegt):
    *
    *   FACHLICH   Die Anwendung hat geantwortet und NEIN gesagt (400, 403,
@@ -599,24 +599,24 @@ export function useZaehlwerk(optionen: {
    *              Das bleibt, wie es war: Anzeige zurückgedreht, rote Zeile,
    *              fertig — ein Wiederholen machte aus einem Nein kein Ja,
    *              sondern eine Schleife, die nie ankommt.
-   *   NETZFEHLER Keine Verbindung, eine Zeitüberschreitung (`SENDEFRIST_MS`)
+   *   NETZFEHLER Keine Verbindung, eine Zeitüberschreitung (`SEND_DEADLINE_MS`)
    *              oder ein 502/503/504 — die Frage ist nie angekommen oder
    *              nie beantwortet worden. Hier, und nur hier, lohnt sich ein
    *              zweiter Versuch: die Anwendung hat nichts abgelehnt, sie
    *              hat nichts gesehen.
    *
-   * KEINE SCHLANGE, EIN MERKPOSTEN. `losschicken` verwirft mit Absicht jede
+   * KEINE SCHLANGE, EIN MERKPOSTEN. `send` verwirft mit Absicht jede
    * überholte Antwort (siehe dort, "VERWORFEN: die Schreibvorgänge in einer
    * Schlange") — dieselbe Haltung gilt hier: es gibt höchstens EINEN Stand,
-   * der noch hinaus soll, nämlich den jüngsten. `merkposten` ist deshalb
+   * der noch hinaus soll, nämlich den jüngsten. `pending` ist deshalb
    * eine einzelne Variable und kein Feld, in das eingereiht wird; ein neuer
    * Tastendruck ERSETZT sie, bevor er selbst losgeschickt wird (siehe
-   * `merkpostenAufraeumen` in `setzen`), und der alte Versuch wird dabei
+   * `pendingCleanup` in `setScore`), und der alte Versuch wird dabei
    * nicht nachgeholt, sondern fallengelassen — genau wie eine überholte
    * Antwort fallengelassen wird.
    *
-   * NUR DIE PUNKTE. `setzen` ist die einzige Stelle, die `netzfehler` an
-   * `losschicken` übergibt. Anstoß, Auszeit und ihre Rücknahme gehen
+   * NUR DIE PUNKTE. `setScore` ist die einzige Stelle, die `onNetworkError` an
+   * `send` übergibt. Anstoß, Auszeit und ihre Rücknahme gehen
    * unverändert in den bestehenden Zweig: ein Schiedsrichtereingriff
    * verlangt ohnehin eine Serverprüfung und soll bei fehlender Verbindung
    * ERKENNBAR nicht verfügbar sein — das leistet die bestehende Abweisung
@@ -635,21 +635,72 @@ export function useZaehlwerk(optionen: {
    * Ausfall die Halle nicht mit Anfragen flutet, die ohnehin ins Leere
    * gehen.
    */
-  let merkposten: { matchId: string, auftrag: StandAuftrag } | null = null
-  let wiederholUhr: ReturnType<typeof setTimeout> | null = null
-  let wiederholVersuch = 0
-  const NETZ_WIEDERHOLUNG_MS = [2_000, 5_000, 10_000, 20_000]
+  /**
+   * `base` liegt HIER NEBEN dem Auftrag, obwohl `pendingSave` sie
+   * ohnehin schon nach `localStorage` schreibt (siehe `StoredScore`).
+   *
+   * Ohne sie im Arbeitsspeicher wüsste `scheduleRetry` vor einem
+   * erneuten Versuch nicht, worauf DIESER Auftrag aufbaute, und könnte den
+   * Abgleich gegen den aktuellen Serverstand nicht ziehen, den
+   * `restoreScore` schon kennt (siehe dort) — sie stünde nur in
+   * `localStorage`, und die dort abzuholen wäre derselbe Umweg, den ein
+   * Neuladen ohnehin schon nimmt, nur ohne dass eines stattgefunden hätte.
+   */
+  let pending: { matchId: string, request: ScoreRequest, base: ScorePair } | null = null
+  let retryTimer: ReturnType<typeof setTimeout> | null = null
+  let retryAttempt = 0
+
+  /*
+   * DIE GESCHWISTER FUER DAS ENDE -- UND WARUM SIE HIER STEHEN UND NICHT
+   * BEI IHREN FUNKTIONEN.
+   *
+   * Sie standen tausend Zeilen weiter unten, direkt ueber
+   * `tryResult`, und das las sich gut: alles zum Ende an einer
+   * Stelle. Es war trotzdem falsch. Der Watcher auf `match.value?.id`
+   * laeuft mit `immediate: true`, also schon beim Aufbau des Zaehlwerks,
+   * und ruft `resultCleanup()`. Funktionen werden nach oben gezogen,
+   * `let` nicht -- der Zugriff traf eine Variable, die es noch nicht gab.
+   *
+   * Die Folge war kein stiller Fehler, sondern ein 500er bei JEDEM
+   * serverseitigen Aufbau der Tafelseite: "Cannot access 'resultTimer'
+   * before initialization". Die Tafel lud einen Tag lang gar nicht, online
+   * wie offline. Gefunden hat es der Agent, der danach den Service Worker
+   * baute -- er konnte seine eigene Arbeit nicht vorfuehren.
+   *
+   * Deshalb stehen sie jetzt bei ihren Geschwistern fuer den Stand, VOR
+   * allem, was sie benutzt.
+   */
+  let result: {
+    matchId: string
+    run: () => Promise<{ advanced: number, newlySettled: number }>
+    stored?: StoredResult
+  } | null = null
+  let resultTimer: ReturnType<typeof setTimeout> | null = null
+  let resultAttempt = 0
+
+  /**
+   * Liegt ein Ende bereit, das die Anwendung noch nicht gesehen hat?
+   *
+   * Die Tafel zeigt dafür ausdrücklich NICHT "finished", aber auch nicht
+   * nichts — sonst stünde die Leiste minutenlang gesperrt, ohne dass
+   * irgendwer sagen könnte, warum.
+   *
+   * Steht hier oben aus demselben Grund wie die drei Zeilen darüber:
+   * `resultCleanup()` setzt es zurück und läuft schon beim Aufbau.
+   */
+  const resultPending = ref(false)
+  const NETWORK_RETRY_MS = [2_000, 5_000, 10_000, 20_000]
 
   /**
    * Steht ein Stand noch aus, weil eine Anfrage an einem Netzfehler
    * gescheitert ist?
    *
-   * Anders als `unbestaetigt` (ein halber Wimpernschlag, siehe oben) ist das
+   * Anders als `unconfirmed` (ein halber Wimpernschlag, siehe oben) ist das
    * die Auskunft für den LANGEN Ausfall — die Tafel zeigt sie dauerhaft an
    * (siehe [table].vue): "diese Zahl ist hier richtig, aber die Anwendung
    * weiss noch nichts davon".
    */
-  const netzausfall = ref(false)
+  const offline = ref(false)
 
   /**
    * Einen gescheiterten Stand loswerden — bei Erfolg, bei einer (jetzt doch
@@ -662,51 +713,115 @@ export function useZaehlwerk(optionen: {
    * dieselbe Partien-Kennung vorkäme — praktisch ausgeschlossen bei UUIDs,
    * aber der Grund, aus dem hier aufgeräumt wird und nicht bloß "meistens".
    */
-  function merkpostenAufraeumen() {
-    if (wiederholUhr) { clearTimeout(wiederholUhr); wiederholUhr = null }
-    if (merkposten) merkpostenGeloescht(merkposten.matchId)
-    merkposten = null
-    wiederholVersuch = 0
-    netzausfall.value = false
+  function pendingCleanup() {
+    if (retryTimer) { clearTimeout(retryTimer); retryTimer = null }
+    if (pending) pendingClear(pending.matchId)
+    pending = null
+    retryAttempt = 0
+    offline.value = false
   }
 
-  /** Den nächsten Wiederholungsversuch für den aktuellen Merkposten einplanen. */
-  function wiederholungPlanen() {
-    if (wiederholUhr) clearTimeout(wiederholUhr)
-    const wartezeit = NETZ_WIEDERHOLUNG_MS[
-      Math.min(wiederholVersuch, NETZ_WIEDERHOLUNG_MS.length - 1)
+  /**
+   * Den nächsten Wiederholungsversuch für den aktuellen Merkposten einplanen.
+   *
+   * VOR JEDEM VERSUCH DERSELBE ABGLEICH WIE BEI `restoreScore` — UND
+   * AUS DEMSELBEN GRUND, jetzt aber auch OHNE dass ein Neuladen dazwischen
+   * lag.
+   *
+   * Bis zum 25.09.2026 fehlte er hier, wörtlich: "Derselbe Auftrag geht
+   * unverändert ein weiteres Mal hinaus." Das galt uneingeschränkt — auch
+   * dann, wenn während des Ausfalls jemand anderes geschrieben hat. Ein
+   * Tablet, das das WLAN verliert und weiterzählt, hält dabei einen Stand
+   * fest, der auf dem Server von VOR dem Ausfall aufbaut (`base`); trägt
+   * das Turnierbüro in der Zwischenzeit von Hand einen Stand ein, damit die
+   * nächste Partie an den Tisch kann, überschreibt der wiederholte Auftrag
+   * genau diesen Eintrag, sobald die Verbindung zurück ist — kommentarlos,
+   * denn der Auftrag selbst weiss nichts von der Änderung.
+   *
+   * `current` gegen `entry.base`: stimmen sie nicht mehr überein, hat der
+   * Server inzwischen etwas anderes gesehen. Verworfen wird dann, NICHT
+   * gesendet — `pendingCleanup` räumt Uhr, Merkposten und
+   * `localStorage` dabei schon richtig ab.
+   *
+   * ERST NACHSCHAUEN, DANN VERGLEICHEN. `match` kommt aus der zuletzt
+   * ERFOLGREICH geladenen Tafel und bleibt während eines Ausfalls
+   * unverändert stehen — richtig für die Anzeige (siehe `tafelHolen` in
+   * [table].vue), aber ohne eigene Alterskennung. Ohne das `await` darunter
+   * träfe dieser Versuch das Fenster zwischen "Verbindung ist zurück" und
+   * "der Zehn-Sekunden-Takt hat neu geladen" und vergliche gegen den ALTEN
+   * Stand — bei vier Sekunden Abstand der ersten beiden Wiederholungen und
+   * zehn Sekunden Takt ungefähr in jedem zweiten Fall.
+   *
+   * Eine Alterskennung in der Tafelantwort wäre der aufwendigere Weg zum
+   * selben Ziel. `refresh` genügt, WEIL ES NIE WIRFT: bei einem
+   * Netzfehler behält `tafelHolen` den alten Stand, der Abgleich findet
+   * folgerichtig nichts, und der Versuch geht hinaus — er scheitert dann
+   * ohnehin am selben Netzfehler und plant sich neu ein. Ist die Verbindung
+   * dagegen zurück, ist `match` genau jetzt frisch.
+   *
+   * VERWORFEN WIRD ÜBER `supersedeAll` UND NICHT ÜBER
+   * `pendingCleanup`: das räumt zwar Uhr, Merkposten und
+   * `localStorage` ab, lässt aber `optimistic` stehen — der Zifferblock
+   * zeigte dann weiter den verworfenen Stand, während die Meldung daneben
+   * sagt, er sei verworfen. `supersedeAll` räumt den Vorgriff mit,
+   * erhöht `latestResponse` (eine verspätete Antwort auf den alten Auftrag
+   * greift nicht mehr) und ruft `pendingCleanup` selbst.
+   */
+  function scheduleRetry() {
+    if (retryTimer) clearTimeout(retryTimer)
+    const waitTime = NETWORK_RETRY_MS[
+      Math.min(retryAttempt, NETWORK_RETRY_MS.length - 1)
     ]!
-    wiederholUhr = setTimeout(() => {
-      wiederholUhr = null
-      const eintrag = merkposten
-      if (!eintrag) return
-      wiederholVersuch++
+    retryTimer = setTimeout(async () => {
+      retryTimer = null
+      const entry = pending
+      if (!entry) return
+      retryAttempt++
+
+      await refresh()
+      // Zwischen dem `await` und hier kann die Partie den Tisch verlassen
+      // haben; dann gehoert der Merkposten niemandem mehr.
+      if (pending !== entry) return
+
+      const m = match.value
+      if (m) {
+        const current: ScorePair = { A: rawScore(m, 'A'), B: rawScore(m, 'B') }
+        if (current.A !== entry.base.A || current.B !== entry.base.B) {
+          report({
+            errorCode: 'SCORE_DISCARDED',
+            text: 'Score discarded — the tournament office entered a result.',
+          })
+          supersedeAll()
+          return
+        }
+      }
+
       // Derselbe Auftrag geht unverändert ein weiteres Mal hinaus — siehe
-      // "EIN AUFRUF UND NICHT ZWEI" bei `setzen`. Scheitert er wieder an
+      // "EIN AUFRUF UND NICHT ZWEI" bei `setScore`. Scheitert er wieder an
       // einem Netzfehler, plant er sich hier selbst erneut ein; scheitert er
-      // fachlich, greift `zurueckdrehen` im Auftrag selbst.
-      losschicken({ ...eintrag.auftrag, netzfehler: wiederholungPlanen })
-    }, wartezeit)
+      // fachlich, greift `rollback` im Auftrag selbst.
+      send({ ...entry.request, onNetworkError: scheduleRetry })
+    }, waitTime)
   }
 
   /**
    * Ein Stand ist an einem Netzfehler gescheitert — hier merken (im
-   * Arbeitsspeicher UND in `localStorage`, siehe `GespeicherterStand`) und
+   * Arbeitsspeicher UND in `localStorage`, siehe `StoredScore`) und
    * den ersten Wiederholungsversuch anstossen.
    */
-  function merkpostenSenden(matchId: string, auftrag: StandAuftrag, gespeichert: GespeicherterStand) {
-    merkposten = { matchId, auftrag }
-    wiederholVersuch = 0
-    netzausfall.value = true
-    merkpostenSpeichern(matchId, gespeichert)
-    wiederholungPlanen()
+  function pendingSend(matchId: string, request: ScoreRequest, stored: StoredScore) {
+    pending = { matchId, request, base: stored.base }
+    retryAttempt = 0
+    offline.value = true
+    pendingSave(matchId, stored)
+    scheduleRetry()
   }
 
   /**
    * BEIM LADEN NACHSEHEN: LIEGT FÜR DIESE PARTIE EIN NICHT ANGEKOMMENER
    * STAND ODER EIN NICHT ANGEKOMMENES ENDE?
    *
-   * Aufgerufen aus dem Beobachter auf `partie.value?.id` weiter unten —
+   * Aufgerufen aus dem Beobachter auf `match.value?.id` weiter unten —
    * FÜR JEDE Partie, die an diesem Tisch neu erscheint, nicht nur beim
    * allerersten Laden. Ein Gerät, das mitten in einer Partie neu geladen
    * wird (der häufigste Fall: jemand wischt das Tablet), sieht dieselbe
@@ -715,27 +830,27 @@ export function useZaehlwerk(optionen: {
    * aufgesetzt wurde.
    *
    * DER ABGLEICH GEGEN DEN AKTUELLEN SERVERSTAND STEHT BEI DEN BEIDEN
-   * WIEDERHERSTELLUNGEN SELBST (`merkposten`/`ergebnis`), NICHT HIER —
+   * WIEDERHERSTELLUNGEN SELBST (`pending`/`result`), NICHT HIER —
    * beide brauchen dafür etwas anderes (einen Stand bzw. gar nichts).
    */
-  function merkpostenWiederherstellen(matchId: string) {
-    const gespeichert = merkpostenGelesen(matchId)
-    if (!gespeichert) return
-    if (gespeichert.art === 'ende') {
-      ergebnisWiederherstellen(matchId, gespeichert)
+  function pendingRestore(matchId: string) {
+    const stored = pendingRead(matchId)
+    if (!stored) return
+    if (stored.kind === 'result') {
+      restoreResult(matchId, stored)
       return
     }
-    standWiederherstellen(matchId, gespeichert)
+    restoreScore(matchId, stored)
   }
 
   /**
    * Einen gespeicherten Stand wiederherstellen — oder verwerfen.
    *
-   * DER ABGLEICH GEGEN `basis`, UND WARUM ER VOR ALLEM ANDEREN STEHT: der
+   * DER ABGLEICH GEGEN `base`, UND WARUM ER VOR ALLEM ANDEREN STEHT: der
    * gespeicherte Stand ist ABSOLUT (siehe der Kopf der Datei, "score wird
    * ABSOLUT übertragen") — ihn einfach erneut zu schicken, würde JEDE
    * Änderung überschreiben, die seit dem Netzausfall geschehen ist, gleich
-   * ob sie von der Turnierleitung kam oder von einem zweiten Gerät. `basis`
+   * ob sie von der Turnierleitung kam oder von einem zweiten Gerät. `base`
    * ist der Stand, auf dem dieser Merkposten aufbaute; stimmt er nicht mehr
    * mit dem überein, was der Server JETZT führt, hat sich zwischenzeitlich
    * etwas geändert, von dem dieses Gerät nichts weiß — und dann gilt die
@@ -743,34 +858,34 @@ export function useZaehlwerk(optionen: {
    * nachweislich führte, nicht, was das Gerät sich zwischendurch gedacht
    * hat. Der Merkposten wird verworfen, NICHT gesendet.
    */
-  function standWiederherstellen(matchId: string, gespeichert: GespeicherterStand) {
-    const m = partie.value
+  function restoreScore(matchId: string, stored: StoredScore) {
+    const m = match.value
     if (!m) return
-    const aktuell: Standpaar = { A: rohstand(m, 'A'), B: rohstand(m, 'B') }
-    if (aktuell.A !== gespeichert.basis.A || aktuell.B !== gespeichert.basis.B) {
-      merkpostenGeloescht(matchId)
+    const current: ScorePair = { A: rawScore(m, 'A'), B: rawScore(m, 'B') }
+    if (current.A !== stored.base.A || current.B !== stored.base.B) {
+      pendingClear(matchId)
       return
     }
 
-    // Die Anzeige sofort wiederherstellen — genau das, was `setzen` beim
+    // Die Anzeige sofort wiederherstellen — genau das, was `setScore` beim
     // ersten Tipp auch getan hätte.
-    vorgemerkt.value = { ...gespeichert.neu }
-    if (gespeichert.vierzehn) {
-      lageVorgemerkt.value = {
-        rest: gespeichert.vierzehn.lage.rest,
-        fouls: { ...gespeichert.vierzehn.lage.fouls },
-        lauf: { ...gespeichert.vierzehn.lage.lauf },
-        high: { ...gespeichert.vierzehn.lage.high },
+    optimistic.value = { ...stored.next }
+    if (stored.move) {
+      tableStateOptimistic.value = {
+        rest: stored.move.tableState.rest,
+        fouls: { ...stored.move.tableState.fouls },
+        run: { ...stored.move.tableState.run },
+        high: { ...stored.move.tableState.high },
       }
-      anstossVorgemerkt.value = {
-        first: (anstossStand.value.first ?? gespeichert.vierzehn.amTisch) as Seite,
-        next: gespeichert.vierzehn.amTisch,
-        seit: Date.now(),
+      breakOptimistic.value = {
+        first: (breakState.value.first ?? stored.move.atTable) as Side,
+        next: stored.move.atTable,
+        since: Date.now(),
       }
     }
 
-    const auftrag = standAuftragBauen(m, gespeichert.neu, gespeichert.ruecknahme, gespeichert.vierzehn)
-    merkpostenSenden(matchId, auftrag, gespeichert)
+    const request = buildScoreRequest(m, stored.next, stored.undo, stored.move)
+    pendingSend(matchId, request, stored)
   }
 
   /**
@@ -782,22 +897,22 @@ export function useZaehlwerk(optionen: {
    */
   /**
    * Der Stand DIESER Seite, so wie ihn `PUT /score` gerade meint — Satzstand
-   * mit Satzformat, sonst der gewohnte Aussenstand. Siehe `satzformat`.
+   * mit Satzformat, sonst der gewohnte Aussenstand. Siehe `setFormat`.
    */
-  function rohstand(m: Match, seite: Seite): number {
-    return (satzformat.value ? (seite === 'A' ? m.sideA.setScore : m.sideB.setScore)
-      : (seite === 'A' ? m.sideA.score : m.sideB.score)) ?? 0
+  function rawScore(m: Match, side: Side): number {
+    return (setFormat.value ? (side === 'A' ? m.sideA.setScore : m.sideB.setScore)
+      : (side === 'A' ? m.sideA.score : m.sideB.score)) ?? 0
   }
 
-  const stand = computed<Standpaar>(() => {
-    if (vorgemerkt.value) return vorgemerkt.value
+  const score = computed<ScorePair>(() => {
+    if (optimistic.value) return optimistic.value
 
-    const m = partie.value
-    const roh = { A: m ? rohstand(m, 'A') : 0, B: m ? rohstand(m, 'B') : 0 }
-    const eigen = gehalten.value
-    if (!eigen) return roh
-    if (Date.now() - eigen.seit > HALTEDAUER_MS) return roh
-    return eigen.stand
+    const m = match.value
+    const raw = { A: m ? rawScore(m, 'A') : 0, B: m ? rawScore(m, 'B') : 0 }
+    const own = held.value
+    if (!own) return raw
+    if (Date.now() - own.since > HOLD_MS) return raw
+    return own.score
   })
 
   /**
@@ -807,11 +922,11 @@ export function useZaehlwerk(optionen: {
    * eigenen Wert — und eine Änderung aus dem Turnierbüro käme in dieser
    * Zeit nicht durch, obwohl beide längst dasselbe meinen.
    */
-  watch(partie, (neu) => {
-    const eigen = gehalten.value
-    if (!eigen || !neu) return
-    if (rohstand(neu, 'A') === eigen.stand.A && rohstand(neu, 'B') === eigen.stand.B) {
-      gehalten.value = null
+  watch(match, (next) => {
+    const own = held.value
+    if (!own || !next) return
+    if (rawScore(next, 'A') === own.score.A && rawScore(next, 'B') === own.score.B) {
+      held.value = null
     }
   })
 
@@ -828,8 +943,8 @@ export function useZaehlwerk(optionen: {
    * wer zwanzig Eingaben zurückgehen will, hat ein anderes Problem als
    * einen Fehltipper — das gehört ins Turnierbüro.
    */
-  const verlauf = ref<Schritt[]>([])
-  const kannZurueck = computed(() => verlauf.value.length > 0 && !laeuft.value)
+  const history = ref<Step[]>([])
+  const canUndo = computed(() => history.value.length > 0 && !busy.value)
 
   /* ----------------------------------------------------------------------
    * DIE DISTANZ — DIE EINE GRENZE, UND SIE WIRD HIER GERECHNET
@@ -839,9 +954,9 @@ export function useZaehlwerk(optionen: {
    * ist ende.. fertig". Zwei Sätze stehen darin, und beide stehen hier:
    *
    *   1. DER STAND GEHT NIE ÜBER DIE DISTANZ HINAUS. Was darüber
-   *      hinausführte, wird auf die Distanz GEDECKELT (`zubuchbar`).
+   *      hinausführte, wird auf die Distanz GEDECKELT (`creditable`).
    *   2. AB DEM ERREICHEN WIRD NICHT MEHR GEZÄHLT. Das sperrt die Leiste
-   *      (`distanzErreicht` → `zaehlsperre` in Zaehlleiste.vue).
+   *      (`distanceReached` → `raceReached` in ScoreBar.vue).
    *
    * WPA 7.4 sagt dasselbe: der Spieler bleibt am Tisch, solange er legal
    * versenkt ODER die erforderliche Punktzahl erreicht und damit gewinnt.
@@ -852,7 +967,7 @@ export function useZaehlwerk(optionen: {
    * WARUM BEIDES HIER STEHT UND NICHT IN DER LEISTE. Der Deckel muss an
    * derselben Stelle sitzen wie die Rechnung, die er deckelt: Stand,
    * Restkugeln und Aufnahme werden aus EINER Differenz gerechnet
-   * (`restEintragen`, `rack`), und wer nur den Stand deckelte, risse die
+   * (`enterRest`, `rack`), und wer nur den Stand deckelte, risse die
    * drei auseinander. Und die Leiste braucht dieselbe Zahl, nach der hier
    * gedeckelt wird — zwei Rechnungen für dieselbe Frage laufen auseinander.
    *
@@ -867,20 +982,20 @@ export function useZaehlwerk(optionen: {
    * Die Distanz, gegen die JETZT gezaehlt wird. 0 heisst „steht nicht fest".
    *
    * MIT SATZFORMAT IST DAS `setRaceTo` UND NICHT `raceTo` — dieselbe
-   * Verschiebung wie bei `stand`/`rohstand` und aus demselben Grund: mit
+   * Verschiebung wie bei `score`/`rawScore` und aus demselben Grund: mit
    * Satzformat rechnet `PUT /score` gegen die Racks bzw. Punkte EINES
    * Satzes, nicht gegen die Saetze der ganzen Partie. `raceTo` bliebe hier
    * die AEUSSERE Zahl (z. B. 3 von 5 Saetzen) — eine Deckelung dagegen
    * spraeche schon nach drei Racks von "Distanz erreicht", mitten im ersten
    * Satz eines "race to 5".
    *
-   * `zusatz.value?.raceTo` bleibt nur der Rueckfall OHNE Satzformat: die
+   * `extra.value?.raceTo` bleibt nur der Rueckfall OHNE Satzformat: die
    * Verwaltung fuehrt dort keine `setRaceTo` (sie steht schon oeffentlich an
    * der Partie, siehe `Match.setRaceTo`, und braucht keine zweite Quelle).
    */
-  const distanz = computed(() => satzformat.value
-    ? (partie.value?.setRaceTo ?? 0)
-    : (zusatz.value?.raceTo ?? partie.value?.raceTo ?? 0))
+  const distance = computed(() => setFormat.value
+    ? (match.value?.setRaceTo ?? 0)
+    : (extra.value?.raceTo ?? match.value?.raceTo ?? 0))
 
   /**
    * Hat jemand die Distanz erreicht?
@@ -894,11 +1009,11 @@ export function useZaehlwerk(optionen: {
    * `>=` und nicht `=`: ein Stand, den das Turnierbüro über die Distanz
    * gesetzt hat, ist auch erreicht.
    */
-  const distanzErreicht = computed(() => distanz.value > 0
-    && (stand.value.A >= distanz.value || stand.value.B >= distanz.value))
+  const distanceReached = computed(() => distance.value > 0
+    && (score.value.A >= distance.value || score.value.B >= distance.value))
 
   /**
-   * Was von `punkte` einer Seite noch gutgeschrieben werden darf.
+   * Was von `points` einer Seite noch gutgeschrieben werden darf.
    *
    * Beispiel des Auftraggebers: Stand 97 von 100, der Schiedsrichter tippt
    * „Rest 8" — das wären +7. Zurück kommt 3.
@@ -911,14 +1026,14 @@ export function useZaehlwerk(optionen: {
    * Distanz — vom Turnierbüro gesetzt —, kommt 0 zurück und nicht eine
    * Zahl, die den Stand SENKTE. Ein Deckel richtet nichts; er hält nur an.
    */
-  function zubuchbar(seite: Seite, punkte: number): number {
-    if (punkte <= 0 || distanz.value <= 0) return punkte
-    return Math.max(0, Math.min(punkte, distanz.value - stand.value[seite]))
+  function creditable(side: Side, points: number): number {
+    if (points <= 0 || distance.value <= 0) return points
+    return Math.max(0, Math.min(points, distance.value - score.value[side]))
   }
 
-  function merken(alt: Schritt) {
-    verlauf.value.push(alt)
-    if (verlauf.value.length > 20) verlauf.value.shift()
+  function remember(old: Step) {
+    history.value.push(old)
+    if (history.value.length > 20) history.value.shift()
   }
 
   /* ----------------------------------------------------------------------
@@ -928,7 +1043,7 @@ export function useZaehlwerk(optionen: {
   /**
    * Die Lage, die noch unterwegs ist, und die zuletzt bestaetigte.
    *
-   * Gebaut wie {@link vorgemerkt} und {@link gehalten} beim Stand, und aus
+   * Gebaut wie {@link optimistic} und {@link held} beim Stand, und aus
    * demselben Grund: die Restkugeln stehen am Tisch neben dem Stand, und
    * eine Zahl, die zurueckspringt, ist dort dasselbe Aergernis wie ein Stand,
    * der zurueckspringt — nur schlimmer, weil die naechste Aufnahme mit ihr
@@ -936,52 +1051,52 @@ export function useZaehlwerk(optionen: {
    * Antwort eintraf, schriebe der naechste Eintrag dem Spieler sieben Punkte
    * zu viel gut.
    */
-  const lageVorgemerkt = ref<Lage | null>(null)
-  const lageGehalten = ref<{ wert: Lage, seit: number } | null>(null)
+  const tableStateOptimistic = ref<TableState | null>(null)
+  const tableStateHeld = ref<{ value: TableState, since: number } | null>(null)
 
   /** Die Lage, die die Tafel zeigen soll — Vorgriff, dann Gehaltenes, dann Abruf. */
-  const lage = computed<Lage>(() => {
-    if (lageVorgemerkt.value) return lageVorgemerkt.value
+  const tableState = computed<TableState>(() => {
+    if (tableStateOptimistic.value) return tableStateOptimistic.value
 
-    const roh: Lage = {
-      rest: zusatz.value?.ballsOnTable ?? VOLLES_RACK,
+    const raw: TableState = {
+      rest: extra.value?.ballsOnTable ?? FULL_RACK,
       fouls: {
-        A: zusatz.value?.fouls?.A ?? 0,
-        B: zusatz.value?.fouls?.B ?? 0,
+        A: extra.value?.fouls?.A ?? 0,
+        B: extra.value?.fouls?.B ?? 0,
       },
-      lauf: {
-        A: zusatz.value?.lauf?.A ?? 0,
-        B: zusatz.value?.lauf?.B ?? 0,
+      run: {
+        A: extra.value?.run?.A ?? 0,
+        B: extra.value?.run?.B ?? 0,
       },
       high: {
-        A: zusatz.value?.high?.A ?? 0,
-        B: zusatz.value?.high?.B ?? 0,
+        A: extra.value?.high?.A ?? 0,
+        B: extra.value?.high?.B ?? 0,
       },
     }
-    const eigen = lageGehalten.value
-    if (!eigen) return roh
-    if (Date.now() - eigen.seit > HALTEDAUER_MS) return roh
-    return eigen.wert
+    const own = tableStateHeld.value
+    if (!own) return raw
+    if (Date.now() - own.since > HOLD_MS) return raw
+    return own.value
   })
 
   /** Hat der Abruf die eigene Lage eingeholt, wird sie losgelassen — wie beim Stand. */
-  watch(zusatz, (neu) => {
-    const eigen = lageGehalten.value
-    if (!eigen || !neu) return
-    if ((neu.ballsOnTable ?? VOLLES_RACK) === eigen.wert.rest
-      && (neu.fouls?.A ?? 0) === eigen.wert.fouls.A
-      && (neu.fouls?.B ?? 0) === eigen.wert.fouls.B
+  watch(extra, (next) => {
+    const own = tableStateHeld.value
+    if (!own || !next) return
+    if ((next.ballsOnTable ?? FULL_RACK) === own.value.rest
+      && (next.fouls?.A ?? 0) === own.value.fouls.A
+      && (next.fouls?.B ?? 0) === own.value.fouls.B
       /*
        * DIE AUFNAHME GEHÖRT MIT IN DEN VERGLEICH. Wird sie ausgelassen,
        * lässt der Abruf die eigene Lage schon los, sobald Rest und Fouls
        * stimmen — und ein High run, der noch unterwegs war, spränge auf der
        * Tafel zurück, um beim nächsten Abruf wieder zu stehen.
        */
-      && (neu.lauf?.A ?? 0) === eigen.wert.lauf.A
-      && (neu.lauf?.B ?? 0) === eigen.wert.lauf.B
-      && (neu.high?.A ?? 0) === eigen.wert.high.A
-      && (neu.high?.B ?? 0) === eigen.wert.high.B) {
-      lageGehalten.value = null
+      && (next.run?.A ?? 0) === own.value.run.A
+      && (next.run?.B ?? 0) === own.value.run.B
+      && (next.high?.A ?? 0) === own.value.high.A
+      && (next.high?.B ?? 0) === own.value.high.B) {
+      tableStateHeld.value = null
     }
   })
 
@@ -992,7 +1107,7 @@ export function useZaehlwerk(optionen: {
   /**
    * Was hier an einer Auszeit gedrückt wurde, bevor die Anwendung es weiß.
    *
-   * `anker` ist der Zeitpunkt des Drucks und damit der Beginn der Uhr;
+   * `anchor` ist der Zeitpunkt des Drucks und damit der Beginn der Uhr;
    * `null` heisst umgekehrt "diese Auszeit ist beendet", auch wenn der
    * Abruf sie noch führt.
    *
@@ -1004,7 +1119,7 @@ export function useZaehlwerk(optionen: {
    * vorweggenommen: die Tafel zeige eine Uhr, das Gerät kenne deren Länge
    * nicht, es müsste also eine Restzeit erfinden und sie beim nächsten
    * Abruf korrigieren. Der erste Teil ist inzwischen falsch — die Länge
-   * steht in `zusatz.timeoutSeconds` und kommt aus `tournament.
+   * steht in `extra.timeoutSeconds` und kommt aus `tournament.
    * timeout_minutes`, das alle 1 638 Turniere gesetzt haben. Der zweite
    * Teil bleibt richtig und wird hier beantwortet.
    *
@@ -1041,9 +1156,9 @@ export function useZaehlwerk(optionen: {
    * Eintreffen der Antwort. Der Versatz verschwindet nicht dadurch, dass
    * man ihn genau kennt.
    */
-  interface Auszeitvorgriff {
+  interface TimeoutOptimistic {
     /** Wann hier gedrückt wurde. `null` heisst: vorweggenommenes ENDE. */
-    anker: number | null
+    anchor: number | null
     /**
      * Hat der Abruf diesen Vorgriff schon eingeholt?
      *
@@ -1054,84 +1169,84 @@ export function useZaehlwerk(optionen: {
      * Losgelassen wird deshalb erst, wenn der Abruf die Auszeit einmal
      * GENANNT hat und sie danach nicht mehr nennt.
      */
-    gesehen: boolean
+    seen: boolean
     /**
      * Wann dieser Vorgriff entstand — die Lunte, nicht die Uhr.
      *
-     * `anker` taugt dafür nicht: beim vorweggenommenen ENDE ist er null,
+     * `anchor` taugt dafür nicht: beim vorweggenommenen ENDE ist er null,
      * und gerade dort wird die Frist gebraucht.
      */
-    seit: number
+    since: number
   }
 
-  const auszeitVorgriff = ref<Partial<Record<Seite, Auszeitvorgriff>>>({})
+  const timeoutOptimistic = ref<Partial<Record<Side, TimeoutOptimistic>>>({})
 
   /**
    * Wie lange ein Vorgriff höchstens UNBESTÄTIGT stehen darf.
    *
    * OHNE DIESE FRIST GIBT ES DEN FALL "HÄNGT FÜR IMMER". Ein Vorgriff wird
    * losgelassen, sobald der Abruf ihn einmal genannt und danach nicht mehr
-   * genannt hat — was aber, wenn er ihn NIE nennt? Dann bleibt `gesehen`
+   * genannt hat — was aber, wenn er ihn NIE nennt? Dann bleibt `seen`
    * falsch, und die Regel darüber hält ihn genau deshalb fest.
    *
    * Der Fall ist nicht erfunden. Scheitert ein Schreibvorgang, während
-   * schon ein jüngerer unterwegs ist, unterbleibt sein `zurueckdrehen` —
-   * das ist Absicht (siehe `losschicken`, "eine Abweisung, die nicht die
+   * schon ein jüngerer unterwegs ist, unterbleibt sein `rollback` —
+   * das ist Absicht (siehe `send`, "eine Abweisung, die nicht die
    * jüngste ist, wird verschwiegen"), nimmt dem Vorgriff aber den Weg
    * hinaus. Ohne Frist liefe danach eine Uhr auf der Tafel, die niemand
    * gestartet hat und die auch der nächsten Partie noch gehört.
    *
-   * Zwanzig Sekunden, dieselben wie HALTEDAUER_MS und aus demselben Grund:
+   * Zwanzig Sekunden, dieselben wie HOLD_MS und aus demselben Grund:
    * die Sendefrist ist nach acht Sekunden vorbei, und danach müssen ZWEI
    * Abrufe Gelegenheit gehabt haben, die Auszeit zu nennen. Läuft sie in
    * der Anwendung wirklich, übernimmt danach deren Uhr — eine Sekunde
    * Versatz ist der richtige Preis dafür, aus diesem Zustand
    * herauszukommen.
    */
-  const VORGRIFF_FRIST_MS = HALTEDAUER_MS
+  const OPTIMISTIC_HOLD_MS = HOLD_MS
 
   /**
    * Der Abruf holt den Vorgriff ein — und erst dann wird losgelassen.
    *
    * Zwei Fälle, und sie sind spiegelbildlich:
    *
-   *   Vorweggenommener BEGINN (`anker` gesetzt). Nennt der Abruf die
-   *   Auszeit, ist sie angekommen (`gesehen`). Nennt er sie DANACH nicht
+   *   Vorweggenommener BEGINN (`anchor` gesetzt). Nennt der Abruf die
+   *   Auszeit, ist sie angekommen (`seen`). Nennt er sie DANACH nicht
    *   mehr, hat sie jemand beendet — dieses Gerät oder ein anderer —, und
    *   der Vorgriff geht. Die Uhr verschwindet damit, ohne je umgeschaltet
    *   zu haben.
    *
-   *   Vorweggenommenes ENDE (`anker` null). Hier ist es umgekehrt: solange
+   *   Vorweggenommenes ENDE (`anchor` null). Hier ist es umgekehrt: solange
    *   der Abruf die Auszeit noch führt, wird sie unterdrückt; nennt er sie
    *   nicht mehr, sind beide einig und der Vorgriff wird überflüssig.
    */
-  watch(auszeitenLaufen, (laeuft) => {
-    const naechster: Partial<Record<Seite, Auszeitvorgriff>> = {}
-    for (const seite of ['A', 'B'] as Seite[]) {
-      const v = auszeitVorgriff.value[seite]
+  watch(timeoutsRunning, (busy) => {
+    const next: Partial<Record<Side, TimeoutOptimistic>> = {}
+    for (const side of ['A', 'B'] as Side[]) {
+      const v = timeoutOptimistic.value[side]
       if (!v) continue
 
       // Die Lunte zuerst: was nie bestätigt wurde, geht nach der Frist —
-      // gleich, was der Abruf gerade sagt. Siehe VORGRIFF_FRIST_MS.
-      if (!v.gesehen && Date.now() - v.seit > VORGRIFF_FRIST_MS) continue
+      // gleich, was der Abruf gerade sagt. Siehe OPTIMISTIC_HOLD_MS.
+      if (!v.seen && Date.now() - v.since > OPTIMISTIC_HOLD_MS) continue
 
-      if (v.anker === null) {
+      if (v.anchor === null) {
         // Vorweggenommenes Ende: fällt weg, sobald der Abruf zustimmt.
-        if (laeuft[seite]) naechster[seite] = v
+        if (busy[side]) next[side] = v
         continue
       }
-      if (laeuft[seite]) naechster[seite] = { ...v, gesehen: true }
-      else if (!v.gesehen) naechster[seite] = v
+      if (busy[side]) next[side] = { ...v, seen: true }
+      else if (!v.seen) next[side] = v
       // sonst: gesehen und jetzt weg — die Auszeit ist zu Ende.
     }
-    auszeitVorgriff.value = naechster
+    timeoutOptimistic.value = next
   }, { deep: true })
 
   /**
    * Wer anstößt, vorweggenommen — beide Felder, weil beide mitgeschickt
    * werden.
    *
-   * Gehalten wie {@link gehalten} beim Stand und aus demselben Grund: ein
+   * Gehalten wie {@link held} beim Stand und aus demselben Grund: ein
    * Abruf, der schon unterwegs war, trägt den alten Anstoß, und ein Balken,
    * der zurückspringt, ist im Saal dasselbe Ärgernis wie eine Zahl, die
    * zurückspringt.
@@ -1146,23 +1261,23 @@ export function useZaehlwerk(optionen: {
    * Auskunft — diese hier —, und damit ist es kein Schatten mehr, sondern
    * die oberste von zwei Schichten.
    */
-  const anstossVorgemerkt = ref<{ first: Seite, next: Seite, seit: number } | null>(null)
+  const breakOptimistic = ref<{ first: Side, next: Side, since: number } | null>(null)
 
   /** Der Anstoß, den die Tafel zeigen soll — Vorgriff vor Abruf. */
-  const anstossStand = computed<{ first: Seite | null, next: Seite | null }>(() => {
-    const v = anstossVorgemerkt.value
-    if (v && Date.now() - v.seit <= HALTEDAUER_MS) return { first: v.first, next: v.next }
+  const breakState = computed<{ first: Side | null, next: Side | null }>(() => {
+    const v = breakOptimistic.value
+    if (v && Date.now() - v.since <= HOLD_MS) return { first: v.first, next: v.next }
     return {
-      first: (zusatz.value?.firstBreak ?? null),
-      next: (zusatz.value?.nextBreak ?? partie.value?.nextBreak ?? null) as Seite | null,
+      first: (extra.value?.firstBreak ?? null),
+      next: (extra.value?.nextBreak ?? match.value?.nextBreak ?? null) as Side | null,
     }
   })
 
   /** Hat der Abruf den Anstoß eingeholt, wird er losgelassen — wie beim Stand. */
-  watch(zusatz, (neu) => {
-    const v = anstossVorgemerkt.value
-    if (!v || !neu) return
-    if (neu.firstBreak === v.first && neu.nextBreak === v.next) anstossVorgemerkt.value = null
+  watch(extra, (next) => {
+    const v = breakOptimistic.value
+    if (!v || !next) return
+    if (next.firstBreak === v.first && next.nextBreak === v.next) breakOptimistic.value = null
   })
 
   /**
@@ -1176,45 +1291,45 @@ export function useZaehlwerk(optionen: {
    * Datei sonst überall vermeidet — und für den Anstoß gibt es gar keine
    * Frist, die es abfinge.
    *
-   * Auf die KENNUNG und nicht auf das Objekt: `partie` bekommt bei jedem
+   * Auf die KENNUNG und nicht auf das Objekt: `match` bekommt bei jedem
    * Abruf eine neue Hülle mit demselben Inhalt, und darauf zu horchen
    * hiesse, den Vorgriff alle zehn Sekunden wegzuwerfen.
    *
    * `{ immediate: true }` SEIT DEM 25.09.2026 — vorher lief dieser
    * Beobachter erst bei einem WECHSEL der Partie an diesem Tisch. Für das
    * Wiederherstellen eines Merkpostens nach einem Neuladen (siehe
-   * `merkpostenWiederherstellen` unten) muss er aber auch beim ALLERERSTEN
+   * `pendingRestore` unten) muss er aber auch beim ALLERERSTEN
    * Erscheinen einer Partie laufen — genau der Fall bei einem Neuladen,
    * bei dem die Partie dieselbe bleibt. Für den bisherigen Zweck ändert das
-   * nichts: beim allerersten Aufruf sind `auszeitVorgriff` & Co. ohnehin
-   * schon leer, `merkpostenAufraeumen`/`ergebnisAufraeumen` finden noch
-   * nichts zum Abräumen, und `laeuft` steht schon auf `false`.
+   * nichts: beim allerersten Aufruf sind `timeoutOptimistic` & Co. ohnehin
+   * schon leer, `pendingCleanup`/`resultCleanup` finden noch
+   * nichts zum Abräumen, und `busy` steht schon auf `false`.
    */
-  watch(() => partie.value?.id ?? null, (neu, alt) => {
-    if (neu === alt) return
-    auszeitVorgriff.value = {}
-    anstossVorgemerkt.value = null
+  watch(() => match.value?.id ?? null, (next, old) => {
+    if (next === old) return
+    timeoutOptimistic.value = {}
+    breakOptimistic.value = null
     // Die Lage gehoert der alten Partie: ein Rest von 8 auf einer frisch
     // aufgebauten Tafel waere eine Falschauskunft, mit der die erste
     // Aufnahme der neuen Partie sofort falsch rechnete.
-    lageVorgemerkt.value = null
-    lageGehalten.value = null
-    verlauf.value = []
+    tableStateOptimistic.value = null
+    tableStateHeld.value = null
+    history.value = []
     // Und ein Merkposten erst recht: er wiederholte sonst einen Stand der
     // alten Partie gegen eine neue, die an diesem Tisch inzwischen steht.
-    merkpostenAufraeumen()
+    pendingCleanup()
     // Dasselbe für ein gemerktes Ende — es gehört der Partie, die gerade
-    // vom Tisch geht, und nicht der, die an ihre Stelle tritt. `laeuft`
+    // vom Tisch geht, und nicht der, die an ihre Stelle tritt. `busy`
     // geht mit: ohne diese Zeile bliebe die Leiste der NEUEN Partie
     // gesperrt, wenn die alte den Tisch verliess, während ihr Ende noch auf
     // eine Wiederholung wartete (die Turnierleitung kann eingreifen, auch
     // wenn dieses Gerät gerade offline war).
-    ergebnisAufraeumen()
-    laeuft.value = false
+    resultCleanup()
+    busy.value = false
 
     // Und erst NACH dem Aufräumen nachsehen, ob für DIESE (neue oder erste)
     // Partie ein Merkposten aus einem früheren Neuladen bereitliegt.
-    if (neu) merkpostenWiederherstellen(neu)
+    if (next) pendingRestore(next)
   }, { immediate: true })
 
   /* ----------------------------------------------------------------------
@@ -1224,14 +1339,14 @@ export function useZaehlwerk(optionen: {
   /**
    * Die Nummer des zuletzt LOSGESCHICKTEN Vorgangs.
    *
-   * Sie zählt nur hoch und wird nie zurückgesetzt. `letzteNummer` ist damit
+   * Sie zählt nur hoch und wird nie zurückgesetzt. `sequence` ist damit
    * gleichbedeutend mit "der jüngste Tastendruck", und das ist die einzige
    * Auskunft, auf die es unten ankommt.
    */
-  let letzteNummer = 0
+  let sequence = 0
 
-  /** Die höchste Nummer, deren Antwort schon da war. Siehe `losschicken`. */
-  let hoechsteAntwort = 0
+  /** Die höchste Nummer, deren Antwort schon da war. Siehe `send`. */
+  let latestResponse = 0
 
   /**
    * Ein Schreibvorgang, der die Tafel NICHT aufhält.
@@ -1267,14 +1382,14 @@ export function useZaehlwerk(optionen: {
    * DIE LÖSUNG: JEDER VORGANG BEKOMMT EINE LAUFENDE NUMMER, UND ZWEI FRAGEN
    * ENTSCHEIDEN ÜBER SEINE ANTWORT.
    *
-   *   (a) `n < hoechsteAntwort` — eine JÜNGERE Antwort war schon da.
+   *   (a) `n < latestResponse` — eine JÜNGERE Antwort war schon da.
    *       Dann ist diese hier überholt, und zwar restlos: sie beschreibt
    *       einen Stand, über den die Anwendung inzwischen hinweggegangen ist.
    *       Sie wird weggeworfen, ohne Wirkung und ohne Meldung. Das ist die
    *       Antwort auf das Bild oben.
    *
-   *   (b) `n === letzteNummer` — es ist nichts JÜNGERES mehr unterwegs.
-   *       Nur dann wird die Anzeige festgeschrieben (`vorgemerkt` gelöscht,
+   *   (b) `n === sequence` — es ist nichts JÜNGERES mehr unterwegs.
+   *       Nur dann wird die Anzeige festgeschrieben (`optimistic` gelöscht,
    *       das Warten beendet) beziehungsweise bei einer Abweisung
    *       zurückgedreht. Ist noch etwas unterwegs, bleibt die vorweg
    *       genommene Zahl stehen — der jüngere Vorgang trägt den absoluten
@@ -1303,44 +1418,44 @@ export function useZaehlwerk(optionen: {
    * falsch. Die Reihenfolge ist die Frage, also wird die Reihenfolge
    * gezählt und nicht der Inhalt geraten.
    */
-  function losschicken<T>(auftrag: {
-    was: () => Promise<T>
+  function send<T>(request: {
+    run: () => Promise<T>
     /** Die Antwort, wenn sie nicht überholt ist — auch wenn Jüngeres läuft. */
-    angekommen?: (summary: T) => void
+    onArrived?: (summary: T) => void
     /** Was die Anzeige zurückdreht, wenn DIESER Vorgang der jüngste ist und scheitert. */
-    zurueckdrehen?: () => void
+    rollback?: () => void
     /**
      * Danach die Tafel neu holen.
      *
-     * NUR dort, wo die Antwort die Wirkung nicht zeigt — siehe `auszeit`
-     * und `anstoss`. Beim Stand wäre es verschenkte Zeit: die Antwort des
+     * NUR dort, wo die Antwort die Wirkung nicht zeigt — siehe `takeTimeout`
+     * und `setBreaker`. Beim Stand wäre es verschenkte Zeit: die Antwort des
      * Endpunkts NENNT den Stand, den die Anwendung führt.
      */
-    nachfassen?: boolean
+    refreshAfter?: boolean
     /**
      * Was bei einem NETZFEHLER geschehen soll, statt der Anwendungsabweisung
      * darunter — nur gesetzt, wo ein Netzausfall überbrückt werden soll
-     * (siehe `merkposten`/`setzen`, "DER NETZFEHLER" weiter oben). Bleibt
+     * (siehe `pending`/`setScore`, "DER NETZFEHLER" weiter oben). Bleibt
      * dieses Feld leer, läuft ein Netzfehler durch denselben Zweig wie jede
-     * fachliche Abweisung: Anzeige zurück, rote Zeile, fertig. `losschicken`
+     * fachliche Abweisung: Anzeige zurück, rote Zeile, fertig. `send`
      * selbst unterscheidet nicht mehr als das — WAS wiederholt wird und WIE
      * lange, entscheidet allein der Aufrufer.
      */
-    netzfehler?: () => void
+    onNetworkError?: () => void
   }) {
-    const n = ++letzteNummer
-    melden(null)
-    wartenBeginnt()
+    const n = ++sequence
+    report(null)
+    beginWaiting()
 
-    auftrag.was().then(
+    request.run().then(
       (summary) => {
-        if (n < hoechsteAntwort) return
-        hoechsteAntwort = n
-        auftrag.angekommen?.(summary)
-        if (n !== letzteNummer) return
-        vorgemerkt.value = null
-        lageVorgemerkt.value = null
-        wartenEndet()
+        if (n < latestResponse) return
+        latestResponse = n
+        request.onArrived?.(summary)
+        if (n !== sequence) return
+        optimistic.value = null
+        tableStateOptimistic.value = null
+        endWaiting()
         /*
          * Ohne `await` und mit Absicht: der Abruf ist eine Auffrischung und
          * keine Bedingung. Wer darauf wartete, hätte den zweiten und dritten
@@ -1348,29 +1463,29 @@ export function useZaehlwerk(optionen: {
          * behoben wurde. Schlägt er fehl, holt der Zehn-Sekunden-Takt es
          * nach; deshalb auch kein `catch`, `holen` schluckt selbst.
          */
-        if (auftrag.nachfassen) void nachschauen()
+        if (request.refreshAfter) void refresh()
       },
-      (roh: unknown) => {
-        if (n < hoechsteAntwort) return
-        hoechsteAntwort = n
-        if (n !== letzteNummer) return
+      (raw: unknown) => {
+        if (n < latestResponse) return
+        latestResponse = n
+        if (n !== sequence) return
         /*
          * NETZFEHLER UND NICHT FACHLICH, UND DER AUFRUFER WILL WIEDERHOLEN.
          * Die Anzeige bleibt unangetastet stehen: kein Zurückdrehen, keine
-         * rote Zeile, kein `wartenEndet` — sie zeigt weiter den vorgemerkten
+         * rote Zeile, kein `endWaiting` — sie zeigt weiter den vorgemerkten
          * Stand, bis entweder die Wiederholung durchkommt (dann läuft die
          * Antwort oben durch den ERFOLGS-Zweig) oder die Anwendung ihn
          * irgendwann tatsächlich ablehnt (dann greift der Zweig darunter).
          */
-        if (auftrag.netzfehler && istNetzfehler(roh)) {
-          auftrag.netzfehler()
+        if (request.onNetworkError && isNetworkError(raw)) {
+          request.onNetworkError()
           return
         }
-        abweisen(roh)
-        auftrag.zurueckdrehen?.()
-        vorgemerkt.value = null
-        lageVorgemerkt.value = null
-        wartenEndet()
+        reject(raw)
+        request.rollback?.()
+        optimistic.value = null
+        tableStateOptimistic.value = null
+        endWaiting()
       },
     )
   }
@@ -1387,12 +1502,12 @@ export function useZaehlwerk(optionen: {
    * irgendwann nachgeholt, schriebe er auf ein Ergebnis, über das die
    * Anwendung schon abgerechnet hat.
    */
-  function alleUeberholen() {
-    hoechsteAntwort = ++letzteNummer
-    vorgemerkt.value = null
-    lageVorgemerkt.value = null
-    wartenEndet()
-    merkpostenAufraeumen()
+  function supersedeAll() {
+    latestResponse = ++sequence
+    optimistic.value = null
+    tableStateOptimistic.value = null
+    endWaiting()
+    pendingCleanup()
   }
 
   /**
@@ -1400,47 +1515,47 @@ export function useZaehlwerk(optionen: {
    * richtig ist.
    *
    * Er wartet die Antwort ab, sperrt solange die ganze Leiste und holt
-   * danach die Tafel neu. Das ist teuer, und deshalb gehen nur `beenden` und
-   * `aufgeben` hier durch: sie melden ein Ergebnis, reichen den Turnierbaum
+   * danach die Tafel neu. Das ist teuer, und deshalb gehen nur `finish` und
+   * `giveUp` hier durch: sie melden ein Ergebnis, reichen den Turnierbaum
    * weiter und lassen sich nicht zurücknehmen. Siehe DRITTENS im Kopf.
    */
-  async function schreiben<T>(was: () => Promise<T>): Promise<T | null> {
-    if (laeuft.value) return null
-    laeuft.value = true
-    melden(null)
+  async function write<T>(run: () => Promise<T>): Promise<T | null> {
+    if (busy.value) return null
+    busy.value = true
+    report(null)
     try {
-      const summary = await was()
-      await nachschauen()
+      const summary = await run()
+      await refresh()
       return summary
     }
-    catch (roh: unknown) {
-      abweisen(roh)
+    catch (raw: unknown) {
+      reject(raw)
       return null
     }
     finally {
-      laeuft.value = false
+      busy.value = false
     }
   }
 
   /**
    * Ein neuer Stand — auf der Tafel sofort, in der Anwendung gleich.
    *
-   * @param altMerken ob der bisherige Stand in den Verlauf soll (bei
-   *   {@link zurueck} nicht, sonst liefe man im Kreis)
-   * @param auchZurueck was neben dem Verlauf noch zurückzunehmen ist,
+   * @param rememberOld ob der bisherige Stand in den Verlauf soll (bei
+   *   {@link performUndo} nicht, sonst liefe man im Kreis)
+   * @param alsoRollback was neben dem Verlauf noch zurückzunehmen ist,
    *   falls dieser Vorgang der jüngste ist und scheitert
-   * @param ruecknahme ob dieser Stand am Tisch ZURÜCKGENOMMEN wird — die
+   * @param undo ob dieser Stand am Tisch ZURÜCKGENOMMEN wird — die
    *   Taste "Undo" und das Minus je Seite. Es ist keine Angabe über den
    *   Stand, sondern über die Bedienung, und sie geht mit auf die Reise:
    *   die Anwendung sieht sonst nur, dass eine Zahl kleiner wurde, und ein
    *   Vertipper sähe im Verlauf aus wie eine Richtigstellung aus dem
    *   Turnierbüro. Siehe `competition.score_writes_its_history`.
    */
-  function setzen(neu: Standpaar, altMerken = true, auchZurueck?: () => void,
-                  ruecknahme = false, vierzehn?: Vierzehnfassung) {
-    const m = partie.value
+  function setScore(next: ScorePair, rememberOld = true, alsoRollback?: () => void,
+                  undo = false, move?: StraightPoolMove) {
+    const m = match.value
     if (!m) return
-    const alt = schrittJetzt(vierzehn?.foulart)
+    const old = currentStep(move?.foulKind)
 
     /*
      * EIN NEUER TIPP ERSETZT EINEN ETWA NOCH AUSSTEHENDEN MERKPOSTEN — er
@@ -1449,79 +1564,79 @@ export function useZaehlwerk(optionen: {
      * nachzuholen, könnte den Stand, den DIESER Tipp gleich schickt, später
      * wieder überschreiben.
      */
-    merkpostenAufraeumen()
+    pendingCleanup()
 
     /*
      * ZUERST DIE ANZEIGE, DANN DAS NETZ — und in dieser Reihenfolge steht
-     * die ganze Änderung. Ab hier liest der nächste Tastendruck (`zaehlen`)
+     * die ganze Änderung. Ab hier liest der nächste Tastendruck (`count`)
      * bereits den neuen Wert, und deshalb ergeben zwei schnelle "+" zwei
      * Sätze und nicht einen.
      */
-    vorgemerkt.value = { ...neu }
+    optimistic.value = { ...next }
     /*
      * DIE LAGE GEHT MIT DEMSELBEN TASTENDRUCK LOS — und zwar sofort, wie der
      * Stand. Wer „Rack" drückt, sieht die Restkugeln im selben Augenblick auf
      * 15 springen; kommt der Schreibvorgang nicht durch, springen Stand UND
      * Rest zusammen zurück.
      *
-     * WER AM TISCH IST, GEHT ÜBER `anstossVorgemerkt` und nicht über ein
+     * WER AM TISCH IST, GEHT ÜBER `breakOptimistic` und nicht über ein
      * eigenes Feld. Das ist dieselbe Auskunft, die die Tafel oben schon
-     * zeichnet (siehe `anstossStand`) — ein zweites Feld daneben wäre ein
+     * zeichnet (siehe `breakState`) — ein zweites Feld daneben wäre ein
      * zweiter Schattenzustand, und die beiden liefen früher oder später
      * auseinander.
      */
-    if (vierzehn) {
-      lageVorgemerkt.value = {
-        rest: vierzehn.lage.rest,
-        fouls: { ...vierzehn.lage.fouls },
-        lauf: { ...vierzehn.lage.lauf },
-        high: { ...vierzehn.lage.high },
+    if (move) {
+      tableStateOptimistic.value = {
+        rest: move.tableState.rest,
+        fouls: { ...move.tableState.fouls },
+        run: { ...move.tableState.run },
+        high: { ...move.tableState.high },
       }
-      anstossVorgemerkt.value = {
-        first: (anstossStand.value.first ?? vierzehn.amTisch) as Seite,
-        next: vierzehn.amTisch,
-        seit: Date.now(),
+      breakOptimistic.value = {
+        first: (breakState.value.first ?? move.atTable) as Side,
+        next: move.atTable,
+        since: Date.now(),
       }
     }
-    if (altMerken) merken(alt)
+    if (rememberOld) remember(old)
 
-    const auftrag = standAuftragBauen(m, neu, ruecknahme, vierzehn, () => {
-      if (altMerken) verlauf.value.pop()
-      auchZurueck?.()
+    const request = buildScoreRequest(m, next, undo, move, () => {
+      if (rememberOld) history.value.pop()
+      alsoRollback?.()
     })
 
-    losschicken({
-      ...auftrag,
+    send({
+      ...request,
       // Nur der Stand wiederholt sich selbst bei einem Netzfehler — siehe
-      // "NUR DIE PUNKTE" bei `merkposten` weiter oben.
-      netzfehler: () => merkpostenSenden(
-        m.id, auftrag, { art: 'stand', basis: alt.stand, neu, ruecknahme, vierzehn }),
+      // "NUR DIE PUNKTE" bei `pending` weiter oben.
+      onNetworkError: () => pendingSend(
+        m.id, request, { kind: 'score', base: old.score, next, undo, move }),
     })
   }
 
   /**
    * Der Rumpf von `PUT /score` und was mit seiner Antwort geschieht — EINMAL
-   * GEBAUT UND ZWEIMAL GEBRAUCHT: beim ersten Tipp (`setzen`) UND beim
+   * GEBAUT UND ZWEIMAL GEBRAUCHT: beim ersten Tipp (`setScore`) UND beim
    * Wiederherstellen eines gespeicherten Merkpostens nach einem Neuladen
-   * (`standWiederherstellen`). Ein Inline-Objekt in `setzen` liesse sich für
-   * den zweiten Fall nicht aufheben, denn dort gibt es kein `setzen`, das es
-   * bauen könnte — nur einen gespeicherten `GespeicherterStand`.
+   * (`restoreScore`). Ein Inline-Objekt in `setScore` liesse sich für
+   * den zweiten Fall nicht aufheben, denn dort gibt es kein `setScore`, das es
+   * bauen könnte — nur einen gespeicherten `StoredScore`.
    *
-   * @param nachZurueckdrehen was NEBEN dem Merkposten noch zurückzunehmen
+   * @param alsoRollback was NEBEN dem Merkposten noch zurückzunehmen
    *   ist, wenn dieser Vorgang der jüngste ist und fachlich scheitert — beim
    *   ersten Tipp der Verlauf, beim Wiederherstellen nichts (siehe dort).
    */
-  function standAuftragBauen(
-    m: Match, neu: Standpaar, ruecknahme: boolean, vierzehn: Vierzehnfassung | undefined,
-    nachZurueckdrehen: () => void = () => {},
-  ): StandAuftrag {
+  function buildScoreRequest(
+    m: Match, next: ScorePair, undo: boolean, move: StraightPoolMove | undefined,
+    alsoRollback: () => void = () => {},
+  ): ScoreRequest {
     return {
-      was: () => $fetch<StandAntwort>(
+      run: () => $fetch<ScoreResponse>(
         `/api/board/matches/${m.id}/score`,
         {
           method: 'PUT',
           body: {
-            scoreA: neu.A, scoreB: neu.B, undo: ruecknahme,
+            scoreA: next.A, scoreB: next.B, undo: undo,
             /*
              * EIN AUFRUF UND NICHT ZWEI. Punkte, Restkugeln, Foulzähler und
              * der Tisch gehören zu demselben Stoss; zwei Umläufe wären zwei
@@ -1529,11 +1644,11 @@ export function useZaehlwerk(optionen: {
              * ausbleiben. Ein halber Zustand (Punkte gebucht, Rest nicht) ist
              * am Tisch schlimmer als gar keiner.
              */
-            ...(vierzehn
+            ...(move
               ? {
-                  ballsOnTable: vierzehn.lage.rest,
-                  foulsA: vierzehn.lage.fouls.A,
-                  foulsB: vierzehn.lage.fouls.B,
+                  ballsOnTable: move.tableState.rest,
+                  foulsA: move.tableState.fouls.A,
+                  foulsB: move.tableState.fouls.B,
                   /*
                    * BEIDE SEITEN UND BEIDE ZAHLEN, jedes Mal. Nur EINE Seite
                    * zu schicken wäre zwar meist richtig — es ist immer nur
@@ -1542,43 +1657,43 @@ export function useZaehlwerk(optionen: {
                    * einen zurück UND die des anderen auf null. Absolut
                    * heisst absolut, und das ist die ganze Bauart hier.
                    */
-                  runA: vierzehn.lage.lauf.A,
-                  highA: vierzehn.lage.high.A,
-                  runB: vierzehn.lage.lauf.B,
-                  highB: vierzehn.lage.high.B,
-                  atTable: vierzehn.amTisch,
-                  ...(vierzehn.foulart ? { foul: vierzehn.foulart } : {}),
+                  runA: move.tableState.run.A,
+                  highA: move.tableState.high.A,
+                  runB: move.tableState.run.B,
+                  highB: move.tableState.high.B,
+                  atTable: move.atTable,
+                  ...(move.foulKind ? { foul: move.foulKind } : {}),
                 }
               : {}),
           },
-          timeout: SENDEFRIST_MS,
+          timeout: SEND_DEADLINE_MS,
         },
       ),
       // Der Stand der ANTWORT und nicht der geschickte: die Anwendung ist die
       // Stelle, die ihn festhält, und sie darf ihn anders auslegen.
-      angekommen: (antwort) => {
+      onArrived: (response) => {
         // Angekommen heisst: ein etwa noch offener Merkposten hat sich
         // erledigt — gleich, ob es der erste Versuch war oder eine
         // Wiederholung nach einem Netzausfall.
-        merkpostenAufraeumen()
-        gehalten.value = { stand: { A: antwort.scoreA, B: antwort.scoreB }, seit: Date.now() }
+        pendingCleanup()
+        held.value = { score: { A: response.scoreA, B: response.scoreB }, since: Date.now() }
         // Dieselbe Regel für die Lage — und nur, wenn die Antwort sie führt.
         // Eine Satzpartie bekommt hier nichts zurück und soll auch nichts
         // festhalten.
-        if (vierzehn && antwort.ballsOnTable !== null && antwort.ballsOnTable !== undefined) {
-          lageGehalten.value = {
-            wert: {
-              rest: antwort.ballsOnTable,
-              fouls: { A: antwort.foulsA ?? 0, B: antwort.foulsB ?? 0 },
-              lauf: { A: antwort.runA ?? 0, B: antwort.runB ?? 0 },
-              high: { A: antwort.highA ?? 0, B: antwort.highB ?? 0 },
+        if (move && response.ballsOnTable !== null && response.ballsOnTable !== undefined) {
+          tableStateHeld.value = {
+            value: {
+              rest: response.ballsOnTable,
+              fouls: { A: response.foulsA ?? 0, B: response.foulsB ?? 0 },
+              run: { A: response.runA ?? 0, B: response.runB ?? 0 },
+              high: { A: response.highA ?? 0, B: response.highB ?? 0 },
             },
-            seit: Date.now(),
+            since: Date.now(),
           }
         }
       },
       /*
-       * Zurückgedreht wird auf `gehalten`, also auf den letzten bestätigten
+       * Zurückgedreht wird auf `held`, also auf den letzten bestätigten
        * Stand — nicht auf den Stand vor DIESEM Tipp. Bei mehreren Tipps
        * hintereinander ist das derselbe Wert; bei einem Tipp, dessen
        * Vorgänger noch unterwegs war, ist es der richtigere: gezeigt wird,
@@ -1586,14 +1701,14 @@ export function useZaehlwerk(optionen: {
        * Gerät sich zwischendurch gedacht hat.
        *
        * NUR HIER, BEI DER FACHLICHEN ABWEISUNG — nicht beim Netzfehler
-       * (siehe `netzfehler` in `setzen`/`standWiederherstellen`): der wird
+       * (siehe `onNetworkError` in `setScore`/`restoreScore`): der wird
        * gemerkt und wiederholt statt zurückgedreht, und räumt den
-       * Merkposten deshalb nicht hier auf, sondern erst in `angekommen`
+       * Merkposten deshalb nicht hier auf, sondern erst in `onArrived`
        * oder wenn diese Zeile hier doch noch erreicht wird.
        */
-      zurueckdrehen: () => {
-        merkpostenAufraeumen()
-        nachZurueckdrehen()
+      rollback: () => {
+        pendingCleanup()
+        alsoRollback()
       },
     }
   }
@@ -1606,11 +1721,11 @@ export function useZaehlwerk(optionen: {
    * beide heissen dasselbe: der Tipp davor war falsch. Wer sie verschieden
    * zeichnete, zeichnete nicht den Vorgang, sondern den Zufall, ob das
    * Tablet zwischendurch neu geladen wurde (der Undo-Stapel lebt nur im
-   * Browser). Der Zifferblock zählt nur aufwärts — `blockOeffnen` wird an
+   * Browser). Der Zifferblock zählt nur aufwärts — `blockOpen` wird an
    * allen vier Stellen mit Vorzeichen +1 geöffnet.
    */
-  function zaehlen(seite: Seite, schritt: number) {
-    const jetzt = stand.value
+  function count(side: Side, step: number) {
+    const now = score.value
     /*
      * UNTEN BEI NULL — AUSSER IM STRAIGHT POOL.
      *
@@ -1622,23 +1737,23 @@ export function useZaehlwerk(optionen: {
     /*
      * OBEN AUF DER DISTANZ — DIE ZWEITE GRENZE UND DIE JÜNGERE.
      *
-     * `zubuchbar` deckelt, was über die Distanz hinausführte: aus einem
+     * `creditable` deckelt, was über die Distanz hinausführte: aus einem
      * Zifferblock-Eintrag „+7" bei 97 von 100 werden 3. Für das einzelne
      * `+1` der Satzfassung ist das meist ein Nullgeschäft — die Sperre in
      * der Leiste kommt ihm zuvor —, und genau deshalb steht es hier und
      * nicht dort: der Zifferblock (`+ N`) trägt eine ganze Aufnahme ein,
      * und der kommt an derselben Zeile vorbei.
      *
-     * NUR AUFWÄRTS, siehe `zubuchbar`. Ein negativer Schritt geht
+     * NUR AUFWÄRTS, siehe `creditable`. Ein negativer Schritt geht
      * unverändert durch — abwärts ist Berichtigen.
      */
-    const roh = jetzt[seite] + zubuchbar(seite, schritt)
-    const neu = {
-      ...jetzt,
-      [seite]: straightPool.value ? roh : Math.max(0, roh),
-    } as Standpaar
-    if (neu.A === jetzt.A && neu.B === jetzt.B) return
-    setzen(neu, true, undefined, schritt < 0)
+    const raw = now[side] + creditable(side, step)
+    const next = {
+      ...now,
+      [side]: straightPool.value ? raw : Math.max(0, raw),
+    } as ScorePair
+    if (next.A === now.A && next.B === now.B) return
+    setScore(next, true, undefined, step < 0)
   }
 
   /* ----------------------------------------------------------------------
@@ -1651,32 +1766,32 @@ export function useZaehlwerk(optionen: {
    * als 15, und „15 minus Rest" schriebe dem Spieler dann Kugeln gut, die
    * schon der Eintrag davor gezaehlt hat.
    *
-   * SIE SCHREIBEN IMMER DEM ZU, DER AM TISCH WAR — `anstossStand.next`, also
+   * SIE SCHREIBEN IMMER DEM ZU, DER AM TISCH WAR — `breakState.next`, also
    * der Zustand VOR diesem Tastendruck. Wer danach dran ist, steht in
    * demselben Aufruf mit drin.
    * ------------------------------------------------------------------- */
 
   /** Wer gerade am Tisch ist. Null heisst: der Anstoss steht noch aus. */
-  const amTisch = computed<Seite | null>(() => anstossStand.value.next)
+  const atTable = computed<Side | null>(() => breakState.value.next)
 
   /** Der ganze Zustand, so wie er JETZT gilt — die Vorlage fuer den Verlauf. */
-  function schrittJetzt(foulart?: 'STANDARD' | 'BREAK' | 'THIRD'): Schritt {
+  function currentStep(foulKind?: 'STANDARD' | 'BREAK' | 'THIRD'): Step {
     return {
-      stand: { ...stand.value },
-      lage: {
-        rest: lage.value.rest,
-        fouls: { ...lage.value.fouls },
-        lauf: { ...lage.value.lauf },
-        high: { ...lage.value.high },
+      score: { ...score.value },
+      tableState: {
+        rest: tableState.value.rest,
+        fouls: { ...tableState.value.fouls },
+        run: { ...tableState.value.run },
+        high: { ...tableState.value.high },
       },
-      amTisch: amTisch.value,
-      ...(foulart ? { foulart } : {}),
+      atTable: atTable.value,
+      ...(foulKind ? { foulKind } : {}),
     }
   }
 
   /** Die andere Seite. */
-  function gegen(seite: Seite): Seite {
-    return seite === 'A' ? 'B' : 'A'
+  function otherSide(side: Side): Side {
+    return side === 'A' ? 'B' : 'A'
   }
 
   /**
@@ -1688,9 +1803,9 @@ export function useZaehlwerk(optionen: {
    * jede Stelle, die sie für sich selbst rechnete, wäre eine Stelle, an der
    * sie auseinanderlaufen kann.
    *
-   * @param seite Wer am Tisch WAR — ihm gehört die Aufnahme.
-   * @param punkte Wie viele Kugeln er auf diesem Vorgang legal versenkt hat.
-   * @param bleibt Ob er am Tisch bleibt. Nur das Rack lässt die Aufnahme
+   * @param side Wer am Tisch WAR — ihm gehört die Aufnahme.
+   * @param points Wie viele Kugeln er auf diesem Vorgang legal versenkt hat.
+   * @param stays Ob er am Tisch bleibt. Nur das Rack lässt die Aufnahme
    *   weiterlaufen (WPA 7.4); alles andere gibt den Tisch weg und beendet
    *   sie.
    *
@@ -1699,7 +1814,7 @@ export function useZaehlwerk(optionen: {
    * offending player's score") und sagt über die Aufnahme nichts — sie ist
    * die Folge LEGAL VERSENKTER Kugeln, und ein Foul versenkt keine. Wer 30
    * macht und dann foult, hat einen High run von 30 und einen Stand von 29.
-   * Die Fouls kommen deshalb mit `punkte: 0` hier durch und nicht mit −1.
+   * Die Fouls kommen deshalb mit `points: 0` hier durch und nicht mit −1.
    *
    * DER HIGH RUN WÄCHST MIT DER LAUFENDEN und nicht erst an ihrem Ende. Wer
    * mitten im Lauf über seinen bisherigen Höchstwert steigt, soll ihn auch
@@ -1707,16 +1822,16 @@ export function useZaehlwerk(optionen: {
    * Rückgängig steht der alte Wert in demselben Schritt, der ihn gehoben hat.
    * Die Prüfbedingung `match_slot_runs` schreibt dieselbe Ordnung fest.
    */
-  function laufFort(seite: Seite, punkte: number, bleibt: boolean):
-  { lauf: Standpaar, high: Standpaar } {
-    const jetzt = lage.value
-    const gesamt = jetzt.lauf[seite] + punkte
+  function continueRun(side: Side, points: number, stays: boolean):
+  { run: ScorePair, high: ScorePair } {
+    const now = tableState.value
+    const total = now.run[side] + points
     return {
-      lauf: { ...jetzt.lauf, [seite]: bleibt ? gesamt : 0 } as Standpaar,
+      run: { ...now.run, [side]: stays ? total : 0 } as ScorePair,
       high: {
-        ...jetzt.high,
-        [seite]: Math.max(jetzt.high[seite], gesamt),
-      } as Standpaar,
+        ...now.high,
+        [side]: Math.max(now.high[side], total),
+      } as ScorePair,
     }
   }
 
@@ -1742,11 +1857,11 @@ export function useZaehlwerk(optionen: {
    * JEDER LEGALE STOSS BEENDET DIE FOULFOLGE (WPA 3.13). Ein Fehlstoss ist
    * kein Foul; der Zaehler der Seite geht auf null.
    */
-  function restEintragen(uebrig: number) {
-    const seite = amTisch.value
-    if (!seite) return
-    const jetzt = lage.value
-    if (uebrig < 0 || uebrig > jetzt.rest) return
+  function enterRest(remaining: number) {
+    const side = atTable.value
+    if (!side) return
+    const now = tableState.value
+    if (remaining < 0 || remaining > now.rest) return
 
     /*
      * GEDECKELT, UND ZWAR HIER — VOR STAND, REST UND AUFNAHME.
@@ -1763,19 +1878,19 @@ export function useZaehlwerk(optionen: {
      * führt sauber zurück — es legt den GANZEN Schritt wieder hin (Stand,
      * Lage, wer am Tisch war) und nicht eine nachgerechnete Fassung davon.
      */
-    const punkte = zubuchbar(seite, jetzt.rest - uebrig)
-    setzen(
-      { ...stand.value, [seite]: stand.value[seite] + punkte } as Standpaar,
+    const points = creditable(side, now.rest - remaining)
+    setScore(
+      { ...score.value, [side]: score.value[side] + points } as ScorePair,
       true, undefined, false,
       {
-        lage: {
-          rest: uebrig <= 1 ? VOLLES_RACK : uebrig,
-          fouls: { ...jetzt.fouls, [seite]: 0 } as Standpaar,
+        tableState: {
+          rest: remaining <= 1 ? FULL_RACK : remaining,
+          fouls: { ...now.fouls, [side]: 0 } as ScorePair,
           // Der Fehlstoss beendet die Aufnahme — die Kugeln DIESES Stosses
           // zaehlen noch zu ihr, der Tisch geht danach weg.
-          ...laufFort(seite, punkte, false),
+          ...continueRun(side, points, false),
         },
-        amTisch: gegen(seite),
+        atTable: otherSide(side),
       },
     )
   }
@@ -1788,7 +1903,7 @@ export function useZaehlwerk(optionen: {
    * waren - 1 = punkte die dazu kommen und der spieler bleibt weiter dran".
    * Genau so steht es in WPA 7.4.
    *
-   * @param auchDieFuenfzehnte Die fuenfzehnte fiel auf demselben Stoss, der
+   * @param alsoFifteenth Die fuenfzehnte fiel auf demselben Stoss, der
    *   die vierzehnte erzielte (WPA 7.8 a). Dann zaehlen ALLE verbliebenen
    *   Kugeln, und alle fuenfzehn werden neu aufgebaut. Das ist der Grund,
    *   warum „0 uebrig" ein gueltiger Fall sein muss und nicht nur „1".
@@ -1796,30 +1911,30 @@ export function useZaehlwerk(optionen: {
    * Danach liegen in beiden Faellen 15: einmal vierzehn im Dreieck plus der
    * Breakball, einmal fuenfzehn neu aufgebaute.
    */
-  function rack(auchDieFuenfzehnte = false) {
-    const seite = amTisch.value
-    if (!seite) return
-    const jetzt = lage.value
+  function rack(alsoFifteenth = false) {
+    const side = atTable.value
+    if (!side) return
+    const now = tableState.value
     // Gedeckelt wie beim Fehlstoss und aus demselben Grund: Stand,
     // Restkugeln und Aufnahme kommen aus dieser einen Zahl.
-    const punkte = zubuchbar(seite,
-                             Math.max(0, jetzt.rest - (auchDieFuenfzehnte ? 0 : 1)))
+    const points = creditable(side,
+                             Math.max(0, now.rest - (alsoFifteenth ? 0 : 1)))
 
-    setzen(
-      { ...stand.value, [seite]: stand.value[seite] + punkte } as Standpaar,
+    setScore(
+      { ...score.value, [side]: score.value[side] + points } as ScorePair,
       true, undefined, false,
       {
-        lage: {
-          rest: VOLLES_RACK,
-          fouls: { ...jetzt.fouls, [seite]: 0 } as Standpaar,
+        tableState: {
+          rest: FULL_RACK,
+          fouls: { ...now.fouls, [side]: 0 } as ScorePair,
           // DIE AUFNAHME LAEUFT WEITER — das Rack ist der EINZIGE Vorgang
           // mit `bleibt: true`, und genau deshalb gibt es im Straight Pool
           // Laeufe ueber hundert Punkte (WPA 7.4).
-          ...laufFort(seite, punkte, true),
+          ...continueRun(side, points, true),
         },
         // ER BLEIBT. Das ist der ganze Unterschied zum Fehlstoss, und der
         // Grund, aus dem der Knopf ueberhaupt eigens dasteht.
-        amTisch: seite,
+        atTable: side,
       },
     )
   }
@@ -1836,19 +1951,19 @@ export function useZaehlwerk(optionen: {
    * waere ausgerechnet der Normalfall nicht einzutragen.
    */
   function safety() {
-    const seite = amTisch.value
-    if (!seite) return
-    const jetzt = lage.value
-    setzen(
-      { ...stand.value }, true, undefined, false,
+    const side = atTable.value
+    if (!side) return
+    const now = tableState.value
+    setScore(
+      { ...score.value }, true, undefined, false,
       {
-        lage: {
-          rest: jetzt.rest,
-          fouls: { ...jetzt.fouls, [seite]: 0 } as Standpaar,
+        tableState: {
+          rest: now.rest,
+          fouls: { ...now.fouls, [side]: 0 } as ScorePair,
           // Keine Punkte, aber der Tisch geht weg: die Aufnahme ist zu Ende.
-          ...laufFort(seite, 0, false),
+          ...continueRun(side, 0, false),
         },
-        amTisch: gegen(seite),
+        atTable: otherSide(side),
       },
     )
   }
@@ -1856,7 +1971,7 @@ export function useZaehlwerk(optionen: {
   /**
    * DAS FOUL (WPA 7.9 bis 7.11) — DREI GRIFFE UND NICHT ZWEI.
    *
-   * @param griff Was am Tisch passiert ist:
+   * @param kind Was am Tisch passiert ist:
    *
    *   `STANDARD`      Das gewoehnliche Foul (7.9): ein Punkt Abzug, der
    *                   Gegner kommt an den Tisch, der Foulzaehler steigt.
@@ -1886,7 +2001,7 @@ export function useZaehlwerk(optionen: {
    * baut fuer einen Eroeffnungsstoss alle fuenfzehn ins Dreieck (die
    * vierzehn ohne Apexkugel gelten nur beim Neuaufbau MITTEN in einer
    * Aufnahme). Ein neuer Eroeffnungsstoss ist wieder ein Eroeffnungsstoss —
-   * deshalb steht `rest` hier ausdruecklich auf {@link VOLLES_RACK} und
+   * deshalb steht `rest` hier ausdruecklich auf {@link FULL_RACK} und
    * nicht auf dem, was vorher lag.
    *
    * KEIN BREAK-FOUL ZAEHLT FUER DIE DREIERFOLGE — AUCH DAS FUENFTE NICHT
@@ -1911,50 +2026,50 @@ export function useZaehlwerk(optionen: {
    * Durchreiche noch die Spalte begrenzen ihn nach unten auf null.
    *
    * JEDES FOUL BEENDET DIE AUFNAHME, KEINES MINDERT SIE — siehe
-   * {@link laufFort}. Auch das dritte Standardfoul, bei dem der Suender am
+   * {@link continueRun}. Auch das dritte Standardfoul, bei dem der Suender am
    * Tisch BLEIBT: eine Aufnahme ist die Folge legal versenkter Kugeln, und
    * die ist mit dem Foul gerissen.
    */
-  function foul(griff: Foulgriff = 'STANDARD') {
-    const seite = amTisch.value
-    if (!seite) return
-    const jetzt = lage.value
+  function foul(kind: FoulKind = 'STANDARD') {
+    const side = atTable.value
+    if (!side) return
+    const now = tableState.value
 
-    if (griff === 'BREAK_AGAIN' || griff === 'BREAK_ACCEPT') {
-      const nochmal = griff === 'BREAK_AGAIN'
-      setzen(
-        { ...stand.value, [seite]: stand.value[seite] - 2 } as Standpaar,
+    if (kind === 'BREAK_AGAIN' || kind === 'BREAK_ACCEPT') {
+      const again = kind === 'BREAK_AGAIN'
+      setScore(
+        { ...score.value, [side]: score.value[side] - 2 } as ScorePair,
         true, undefined, false,
         {
-          lage: {
+          tableState: {
             // Wiederholung: neu aufgebaut, also wieder fuenfzehn (7.2/7.6).
             // Annahme: die Lage bleibt genau so liegen, wie sie liegt.
-            rest: nochmal ? VOLLES_RACK : jetzt.rest,
+            rest: again ? FULL_RACK : now.rest,
             // UNBERUEHRT — 7.11, und zwar bei jedem Fehlversuch.
-            fouls: { ...jetzt.fouls },
-            ...laufFort(seite, 0, false),
+            fouls: { ...now.fouls },
+            ...continueRun(side, 0, false),
           },
           // DER EINZIGE UNTERSCHIED ZWISCHEN DEN BEIDEN GRIFFEN.
-          amTisch: nochmal ? seite : gegen(seite),
-          foulart: 'BREAK',
+          atTable: again ? side : otherSide(side),
+          foulKind: 'BREAK',
         },
       )
       return
     }
 
-    const folge = jetzt.fouls[seite] + 1
-    const dritte = folge >= 3
-    setzen(
-      { ...stand.value, [seite]: stand.value[seite] - (dritte ? 16 : 1) } as Standpaar,
+    const streak = now.fouls[side] + 1
+    const third = streak >= 3
+    setScore(
+      { ...score.value, [side]: score.value[side] - (third ? 16 : 1) } as ScorePair,
       true, undefined, false,
       {
-        lage: {
-          rest: dritte ? VOLLES_RACK : jetzt.rest,
-          fouls: { ...jetzt.fouls, [seite]: dritte ? 0 : folge } as Standpaar,
-          ...laufFort(seite, 0, false),
+        tableState: {
+          rest: third ? FULL_RACK : now.rest,
+          fouls: { ...now.fouls, [side]: third ? 0 : streak } as ScorePair,
+          ...continueRun(side, 0, false),
         },
-        amTisch: dritte ? seite : gegen(seite),
-        foulart: dritte ? 'THIRD' : 'STANDARD',
+        atTable: third ? side : otherSide(side),
+        foulKind: third ? 'THIRD' : 'STANDARD',
       },
     )
   }
@@ -1977,18 +2092,18 @@ export function useZaehlwerk(optionen: {
    * versehentlich weitergegeben hat, nimmt das mit „Undo" zurueck und nicht
    * damit, dass der Lauf heimlich stehenbleibt.
    */
-  function tischWechseln() {
-    const seite = amTisch.value
-    if (!seite) return
-    const jetzt = lage.value
-    setzen({ ...stand.value }, true, undefined, false,
+  function switchTable() {
+    const side = atTable.value
+    if (!side) return
+    const now = tableState.value
+    setScore({ ...score.value }, true, undefined, false,
            {
-             lage: {
-               rest: jetzt.rest,
-               fouls: { ...jetzt.fouls },
-               ...laufFort(seite, 0, false),
+             tableState: {
+               rest: now.rest,
+               fouls: { ...now.fouls },
+               ...continueRun(side, 0, false),
              },
-             amTisch: gegen(seite),
+             atTable: otherSide(side),
            })
   }
 
@@ -2003,25 +2118,25 @@ export function useZaehlwerk(optionen: {
    *
    * Der Schritt wird SOFORT aus dem Verlauf genommen und bei einer Abweisung
    * wieder hineingelegt. Vorher wurde er erst nach der Antwort entfernt
-   * (`if (!fehler.value)`) — das ging nur, solange auf die Antwort gewartet
+   * (`if (!error.value)`) — das ging nur, solange auf die Antwort gewartet
    * wurde, und hätte ohne dieses Warten den Fehltipper zweimal zurückgenommen.
    */
-  function zurueck() {
-    const alt = verlauf.value[verlauf.value.length - 1]
-    if (!alt) return
-    verlauf.value.pop()
+  function performUndo() {
+    const old = history.value[history.value.length - 1]
+    if (!old) return
+    history.value.pop()
     /*
      * IM STRAIGHT POOL GEHT DIE GANZE LAGE MIT ZURÜCK — Restkugeln,
      * Foulzähler und der Tisch. Ohne sie nähme das Undo nur die Punkte
      * zurück und liesse den Rest stehen, und die nächste Aufnahme rechnete
      * mit einer Zahl, die zu einem Stand gehört, den es nicht mehr gibt.
      *
-     * `alt.amTisch` kann nur dann fehlen, wenn der Schritt vor dem ersten
+     * `old.atTable` kann nur dann fehlen, wenn der Schritt vor dem ersten
      * Anstoss entstanden ist — dann gibt es auch nichts zurückzugeben.
      */
-    setzen(alt.stand, false, () => verlauf.value.push(alt), true,
-           straightPool.value && alt.amTisch
-             ? { lage: alt.lage, amTisch: alt.amTisch, foulart: alt.foulart }
+    setScore(old.score, false, () => history.value.push(old), true,
+           straightPool.value && old.atTable
+             ? { tableState: old.tableState, atTable: old.atTable, foulKind: old.foulKind }
              : undefined)
   }
 
@@ -2034,33 +2149,33 @@ export function useZaehlwerk(optionen: {
    * schreibt immer beide, und ein leeres `first_break` nähme der Partie die
    * Vorbedingung, ohne die kein Stand mehr angenommen wird.
    *
-   * VORWEGGENOMMEN SEIT DEM 15.09.2026 — siehe `anstossVorgemerkt`, wo die
+   * VORWEGGENOMMEN SEIT DEM 15.09.2026 — siehe `breakOptimistic`, wo die
    * Abwägung gegen den früheren Einwand steht. Nachgefasst wird weiter: die
    * Wirkung steht nicht in der Antwort, und der Vorgriff soll so kurz wie
    * möglich der einzige Zeuge sein.
    */
-  function anstoss(seite: Seite) {
-    const m = partie.value
+  function setBreaker(side: Side) {
+    const m = match.value
     if (!m) return
-    const erster = (anstossStand.value.first ?? seite) as Seite
-    const vorher = anstossVorgemerkt.value
+    const first = (breakState.value.first ?? side) as Side
+    const before = breakOptimistic.value
 
     // Zuerst die Anzeige, dann das Netz — dieselbe Reihenfolge wie in
-    // `setzen`, und aus demselben Grund: der Balken springt sofort um.
-    anstossVorgemerkt.value = { first: erster, next: seite, seit: Date.now() }
+    // `setScore`, und aus demselben Grund: der Balken springt sofort um.
+    breakOptimistic.value = { first: first, next: side, since: Date.now() }
 
-    losschicken({
-      was: () => $fetch<{ firstBreak: string, nextBreak: string }>(
+    send({
+      run: () => $fetch<{ firstBreak: string, nextBreak: string }>(
         `/api/board/matches/${m.id}/break`, {
           method: 'PUT',
-          body: { firstBreak: erster, nextBreak: seite },
-          timeout: SENDEFRIST_MS,
+          body: { firstBreak: first, nextBreak: side },
+          timeout: SEND_DEADLINE_MS,
         }),
       // Zurück auf den Stand VOR diesem Druck und nicht auf null: war schon
       // etwas vorgemerkt, das der Abruf noch nicht bestätigt hat, wäre null
       // ein Sprung auf eine Auskunft, die älter ist als beide.
-      zurueckdrehen: () => { anstossVorgemerkt.value = vorher },
-      nachfassen: true,
+      rollback: () => { breakOptimistic.value = before },
+      refreshAfter: true,
     })
   }
 
@@ -2075,41 +2190,41 @@ export function useZaehlwerk(optionen: {
    * stoppen"), UND SEIT DEM 15.09.2026 WIRD SIE VORWEGGENOMMEN. Die Uhr
    * läuft mit dem Tastendruck an und hört mit ihm auf; die Antwort
    * korrigiert sie höchstens, und wie das ohne Springen abgeht, steht bei
-   * `auszeitVorgriff`.
+   * `timeoutOptimistic`.
    *
    * Der Einwand von gestern ("das Gerät kennt die Länge nicht") ist nicht
    * weggewischt, sondern erledigt: die Länge steht jetzt in
-   * `zusatz.timeoutSeconds`. Fehlt sie doch einmal, wird der BEGINN nicht
+   * `extra.timeoutSeconds`. Fehlt sie doch einmal, wird der BEGINN nicht
    * vorweggenommen — eine Uhr ohne Länge wäre eine erfundene Restzeit, und
    * das war der Einwand zu Recht. Das ENDE braucht keine Länge und wird
    * darum immer vorweggenommen.
    */
-  function auszeit(seite: Seite, laeuftGerade: boolean) {
-    const m = partie.value
+  function takeTimeout(side: Side, running: boolean) {
+    const m = match.value
     if (!m) return
 
-    const vorher = auszeitVorgriff.value[seite]
-    const dauer = zusatz.value?.timeoutSeconds ?? null
+    const before = timeoutOptimistic.value[side]
+    const duration = extra.value?.timeoutSeconds ?? null
 
-    if (laeuftGerade) {
-      auszeitVorgriff.value = {
-        ...auszeitVorgriff.value, [seite]: { anker: null, gesehen: false, seit: Date.now() },
+    if (running) {
+      timeoutOptimistic.value = {
+        ...timeoutOptimistic.value, [side]: { anchor: null, seen: false, since: Date.now() },
       }
     }
-    else if (dauer !== null) {
-      auszeitVorgriff.value = {
-        ...auszeitVorgriff.value, [seite]: { anker: Date.now(), gesehen: false, seit: Date.now() },
+    else if (duration !== null) {
+      timeoutOptimistic.value = {
+        ...timeoutOptimistic.value, [side]: { anchor: Date.now(), seen: false, since: Date.now() },
       }
     }
 
-    losschicken({
-      was: () => $fetch<{
+    send({
+      run: () => $fetch<{
         side?: string, taken?: number, status?: string, withdrawn?: boolean
       }>(
         `/api/board/matches/${m.id}/timeout`, {
           method: 'POST',
-          body: { side: seite, running: laeuftGerade },
-          timeout: SENDEFRIST_MS,
+          body: { side: side, running },
+          timeout: SEND_DEADLINE_MS,
         }),
       /*
        * Abgewiesen heisst: die Uhr gehört weg beziehungsweise wieder her.
@@ -2117,24 +2232,24 @@ export function useZaehlwerk(optionen: {
        * übrig", und eine Uhr, die daneben weiterliefe, wäre die
        * schlimmere Falschmeldung von beiden.
        */
-      zurueckdrehen: () => { auszeitVorgriffSetzen(seite, vorher) },
-      nachfassen: true,
+      rollback: () => { setTimeoutOptimistic(side, before) },
+      refreshAfter: true,
     })
   }
 
   /** Einen Vorgriff setzen oder entfernen — an einer Stelle, für drei Aufrufer. */
-  function auszeitVorgriffSetzen(seite: Seite, wert: Auszeitvorgriff | undefined) {
-    const naechster = { ...auszeitVorgriff.value }
-    if (wert) naechster[seite] = wert
-    else delete naechster[seite]
-    auszeitVorgriff.value = naechster
+  function setTimeoutOptimistic(side: Side, value: TimeoutOptimistic | undefined) {
+    const next = { ...timeoutOptimistic.value }
+    if (value) next[side] = value
+    else delete next[side]
+    timeoutOptimistic.value = next
   }
 
   /**
    * DIE AUSZEIT ZURÜCKNEHMEN — der Weg des Schiedsrichtermenüs.
    *
-   * NICHT {@link auszeit}, und das ist seit dem 15.09.2026 der ganze Punkt.
-   * Bis dahin rief der Menüpunkt schlicht `auszeit(seite, true)` auf, also
+   * NICHT {@link takeTimeout}, und das ist seit dem 15.09.2026 der ganze Punkt.
+   * Bis dahin rief der Menüpunkt schlicht `takeTimeout(side, true)` auf, also
    * genau denselben Weg wie ein zweites Antippen an der Zählleiste — und
    * damit lief er in dessen Zehn-Sekunden-Frist. Der Auftraggeber: "wenn
    * ich ueber das schiri menue das timeout zurueck setze, wird es dem
@@ -2160,29 +2275,29 @@ export function useZaehlwerk(optionen: {
    * (vertippte Ziffern) erreicht die Leitung gar nicht erst: die Rückfrage
    * gibt sechs Ziffern nicht heraus, bevor es sechs sind.
    */
-  function auszeitRuecknahme(seite: Seite, code = '') {
-    const m = partie.value
+  function withdrawTimeout(side: Side, code = '') {
+    const m = match.value
     if (!m) return
 
-    const vorher = auszeitVorgriff.value[seite]
-    auszeitVorgriff.value = {
-      ...auszeitVorgriff.value, [seite]: { anker: null, gesehen: false, seit: Date.now() },
+    const before = timeoutOptimistic.value[side]
+    timeoutOptimistic.value = {
+      ...timeoutOptimistic.value, [side]: { anchor: null, seen: false, since: Date.now() },
     }
 
-    losschicken({
-      was: () => $fetch<{
+    send({
+      run: () => $fetch<{
         side?: string, taken?: number, status?: string, withdrawn?: boolean
       }>(
         `/api/board/matches/${m.id}/timeout/withdraw`, {
           method: 'POST',
-          body: { side: seite, ...(code === '' ? {} : { boardPin: code }) },
-          timeout: SENDEFRIST_MS,
+          body: { side: side, ...(code === '' ? {} : { boardPin: code }) },
+          timeout: SEND_DEADLINE_MS,
         }),
-      zurueckdrehen: () => { auszeitVorgriffSetzen(seite, vorher) },
-      // Das Guthaben steht in `zusatz.timeoutsTaken` und nicht in der
+      rollback: () => { setTimeoutOptimistic(side, before) },
+      // Das Guthaben steht in `extra.timeoutsTaken` und nicht in der
       // Anzeige dieser Datei — ohne Nachfassen bliebe im Menü "2 taken"
       // stehen, obwohl die Rücknahme längst durch ist.
-      nachfassen: true,
+      refreshAfter: true,
     })
   }
 
@@ -2192,135 +2307,119 @@ export function useZaehlwerk(optionen: {
    *
    * Der Auftraggeber, präzisiert am 25.09.2026: "eine Partie ohne WiFi am
    * Tablet zu Ende spielen können, exkl. Schiri-Eingriffe". Zu Ende SPIELEN
-   * schliesst das ABSCHLIESSEN ein — ohne `beenden`/`aufgeben` bliebe die
+   * schliesst das ABSCHLIESSEN ein — ohne `finish`/`giveUp` bliebe die
    * Partie auf "läuft" stehen und blockierte den Tisch, und genau das soll
    * dieser ganze Umbau verhindern.
    *
-   * DIE BEGRÜNDUNG ÜBER `beenden`, WARUM ES NICHT VORWEGGENOMMEN WIRD (siehe
+   * DIE BEGRÜNDUNG ÜBER `finish`, WARUM ES NICHT VORWEGGENOMMEN WIRD (siehe
    * DRITTENS im Kopf der Datei), BLEIBT UNVERÄNDERT RICHTIG: die Fläche darf
    * nicht sofort "fertig" behaupten und es eine Sekunde später doch nicht
    * sein. Sie sagt NICHT, dass ein Netzfehler nicht überbrückt werden dürfe
    * — sie sagt nur, dass die Anzeige dabei nicht vorgreifen darf. Deshalb
-   * bleiben `beenden` und `aufgeben` ABWARTEND: sie laufen weiter über
-   * `laeuft` und sperren die Leiste, solange ein Versuch — der erste oder
+   * bleiben `finish` und `giveUp` ABWARTEND: sie laufen weiter über
+   * `busy` und sperren die Leiste, solange ein Versuch — der erste oder
    * eine Wiederholung — unterwegs ist oder auf seine Wiederholung wartet.
    *
    * FACHLICH GENAUSO WIE BEIM STAND: eine Abweisung mit einer Fachkennung
    * (etwa RACE_NOT_REACHED, weil das Turnierbüro inzwischen selbst
    * eingegriffen hat) wird gezeigt und NICHT wiederholt. Nur ein Netzfehler
    * — keine Verbindung, eine Zeitüberschreitung, 502/503/504 — wird gemerkt
-   * (`ergebnis`) und mit denselben wachsenden Abständen erneut versucht wie
-   * ein Stand (`NETZ_WIEDERHOLUNG_MS`, siehe dort für die Begründung gegen
+   * (`result`) und mit denselben wachsenden Abständen erneut versucht wie
+   * ein Stand (`NETWORK_RETRY_MS`, siehe dort für die Begründung gegen
    * `navigator.onLine`).
    *
    * DIE TAFEL SAGT DABEI AUSDRÜCKLICH NICHT "FINISHED". Es gibt hier keinen
    * Vorgriff — anders als beim Stand ist der ganze Sinn dieser Route, dass
    * die Anwendung selbst entscheidet, ob die Partie zu Ende ist (siehe
-   * "KEIN RUMPF, UND KEIN SIEGER IM AUFRUF" unten). `ergebnisAusstehend`
+   * "KEIN RUMPF, UND KEIN SIEGER IM AUFRUF" unten). `resultPending`
    * ist deshalb nur eine Auskunft — "das Ergebnis liegt hier bereit, die
    * Anwendung hat es noch nicht gesehen" — und keine Behauptung, dass es
    * schon gilt.
    *
    * EIN GEMERKTES ERGEBNIS ERSETZT EINEN GEMERKTEN STAND, NICHT UMGEKEHRT.
-   * `aufgeben` schickt scoreA/scoreB selbst mit (siehe dort) — ein noch
+   * `giveUp` schickt scoreA/scoreB selbst mit (siehe dort) — ein noch
    * offener Punkt-Merkposten wäre in dem Moment nur eine überflüssige
    * zweite Wahrheit über denselben Stand und wird deshalb VOR dem Versuch
-   * aufgeräumt. `beenden` dagegen trägt gar keinen Stand im Aufruf
+   * aufgeräumt. `finish` dagegen trägt gar keinen Stand im Aufruf
    * (`competition.confirm_match_result` liest ihn aus der Datenbank) — ein
    * zu diesem Zeitpunkt noch offener Punkt-Merkposten bliebe hier unberührt
    * und liefe unabhängig weiter; das ist der eine Fall, den dieser Umbau
    * NICHT auflöst (siehe die Meldung am Ende des Auftrags).
    *
    * ÜBERSTEHT EBENFALLS EIN NEULADEN — genau wie der Stand (siehe
-   * `GespeicherterMerkposten` am Kopf der Datei): am selben Schlüssel liegt
-   * hier `{ art: 'ende', ... }`, und `merkpostenWiederherstellen` liest ihn
+   * `StoredPending` am Kopf der Datei): am selben Schlüssel liegt
+   * hier `{ kind: 'result', ... }`, und `pendingRestore` liest ihn
    * genauso aus wie einen Stand.
    */
-  let ergebnis: {
-    matchId: string
-    was: () => Promise<{ advanced: number, newlySettled: number }>
-    gespeichert: GespeichertesEnde
-  } | null = null
-  let ergebnisUhr: ReturnType<typeof setTimeout> | null = null
-  let ergebnisVersuch = 0
 
-  /**
-   * Liegt ein Ende bereit, das die Anwendung noch nicht gesehen hat?
-   *
-   * Die Tafel zeigt dafür ausdrücklich NICHT "finished" (siehe oben), aber
-   * auch nicht nichts — sonst stünde die Leiste minutenlang gesperrt, ohne
-   * dass irgendwer sagen könnte, warum.
-   */
-  const ergebnisAusstehend = ref(false)
-
-  function ergebnisAufraeumen() {
-    if (ergebnisUhr) { clearTimeout(ergebnisUhr); ergebnisUhr = null }
-    if (ergebnis) merkpostenGeloescht(ergebnis.matchId)
-    ergebnis = null
-    ergebnisVersuch = 0
-    ergebnisAusstehend.value = false
+  function resultCleanup() {
+    if (resultTimer) { clearTimeout(resultTimer); resultTimer = null }
+    if (result) pendingClear(result.matchId)
+    result = null
+    resultAttempt = 0
+    resultPending.value = false
   }
 
   /** Einen Versuch unternehmen — den ersten oder eine Wiederholung. */
-  async function ergebnisVersuchen() {
-    const eintrag = ergebnis
-    if (!eintrag) return
+  async function tryResult() {
+    const entry = result
+    if (!entry) return
     try {
-      await eintrag.was()
-      await nachschauen()
+      await entry.run()
+      await refresh()
       // Was zu Ende ist, wird nicht mehr zurückgenommen — und ein Verlauf,
       // der auf eine beendete Partie zeigt, wäre eine Falle.
-      verlauf.value = []
-      gehalten.value = null
-      lageGehalten.value = null
-      alleUeberholen()
-      ergebnisAufraeumen()
-      laeuft.value = false
+      history.value = []
+      held.value = null
+      tableStateHeld.value = null
+      supersedeAll()
+      resultCleanup()
+      busy.value = false
     }
-    catch (roh: unknown) {
-      if (istNetzfehler(roh) && eintrag.gespeichert) {
-        // Erst HIER abgelegt und nicht schon in `beendenSchreiben`: ein
+    catch (raw: unknown) {
+      if (isNetworkError(raw) && entry.stored) {
+        // Erst HIER abgelegt und nicht schon in `writeFinish`: ein
         // Ende, das beim ersten Versuch sofort durchgeht (der häufigste
         // Fall, solange das Netz steht), soll gar nicht erst in
         // `localStorage` stehen — dort gehört nur, was WIRKLICH noch
         // aussteht.
-        merkpostenSpeichern(eintrag.matchId, eintrag.gespeichert)
-        ergebnisAusstehend.value = true
-        ergebnisWiederholungPlanen()
-        // `laeuft` bleibt WAHR — die Leiste bleibt gesperrt, bis entweder
+        pendingSave(entry.matchId, entry.stored)
+        resultPending.value = true
+        scheduleResultRetry()
+        // `busy` bleibt WAHR — die Leiste bleibt gesperrt, bis entweder
         // die Wiederholung durchkommt oder die Anwendung doch noch fachlich
         // ablehnt. Das ist dieselbe Abwägung wie beim ersten Versuch: eine
         // Fläche, die zwischendurch wieder "geht", behauptete ein Ende, das
         // gerade nicht feststeht.
         return
       }
-      abweisen(roh)
-      ergebnisAufraeumen()
-      laeuft.value = false
+      reject(raw)
+      resultCleanup()
+      busy.value = false
     }
   }
 
-  function ergebnisWiederholungPlanen() {
-    if (ergebnisUhr) clearTimeout(ergebnisUhr)
-    const wartezeit = NETZ_WIEDERHOLUNG_MS[
-      Math.min(ergebnisVersuch, NETZ_WIEDERHOLUNG_MS.length - 1)
+  function scheduleResultRetry() {
+    if (resultTimer) clearTimeout(resultTimer)
+    const waitTime = NETWORK_RETRY_MS[
+      Math.min(resultAttempt, NETWORK_RETRY_MS.length - 1)
     ]!
-    ergebnisUhr = setTimeout(() => {
-      ergebnisUhr = null
-      if (!ergebnis) return
-      ergebnisVersuch++
-      void ergebnisVersuchen()
-    }, wartezeit)
+    resultTimer = setTimeout(() => {
+      resultTimer = null
+      if (!result) return
+      resultAttempt++
+      void tryResult()
+    }, waitTime)
   }
 
   /**
-   * Der abwartende Weg für `beenden`/`aufgeben` — dieselbe Sperre wie
-   * `schreiben`, aber mit der Netzwiederholung von oben statt einer
+   * Der abwartende Weg für `finish`/`giveUp` — dieselbe Sperre wie
+   * `write`, aber mit der Netzwiederholung von oben statt einer
    * endgültigen Abweisung.
    */
-  async function beendenSchreiben(
+  async function writeFinish(
     matchId: string,
-    was: () => Promise<{ advanced: number, newlySettled: number }>,
+    run: () => Promise<{ advanced: number, newlySettled: number }>,
     /**
      * Was bei einem Netzfehler gemerkt wird -- oder `undefined`, wenn
      * dieser Vorgang NICHT nachgeholt werden darf.
@@ -2329,15 +2428,15 @@ export function useZaehlwerk(optionen: {
      * merken hiesse, ihn zu speichern, und ein Code, der eine
      * Disqualifikation deckt, gehoert nicht in den `localStorage` eines
      * Tablets, das in einer Halle herumliegt. Siehe die Begruendung bei
-     * `aufgeben`.
+     * `giveUp`.
      */
-    gespeichert?: GespeichertesEnde,
+    stored?: StoredResult,
   ) {
-    if (laeuft.value) return
-    laeuft.value = true
-    melden(null)
-    ergebnis = { matchId, was, gespeichert }
-    await ergebnisVersuchen()
+    if (busy.value) return
+    busy.value = true
+    report(null)
+    result = { matchId, run, stored }
+    await tryResult()
   }
 
   /**
@@ -2345,42 +2444,42 @@ export function useZaehlwerk(optionen: {
    *
    * KEIN ABGLEICH BEI `confirm` — der Aufruf trägt keinen Stand, die
    * Anwendung liest ihn selbst aus der Datenbank (siehe die Begründung vor
-   * `beenden`); es gibt hier nichts, das veralten könnte.
+   * `finish`); es gibt hier nichts, das veralten könnte.
    *
-   * BEI `result` DERSELBE ABGLEICH WIE BEIM STAND (`standWiederherstellen`):
-   * `basis` ist der Stand, auf dem `rumpf.scoreA`/`scoreB` beruhen. Führt
+   * BEI `result` DERSELBE ABGLEICH WIE BEIM STAND (`restoreScore`):
+   * `base` ist der Stand, auf dem `body.scoreA`/`scoreB` beruhen. Führt
    * der Server inzwischen einen anderen, hat sich seit dem Netzausfall
    * etwas geändert, von dem dieses Gerät nichts weiß — verworfen statt
-   * gesendet, aus demselben Grund. `basis` ist `null` bei WALKOVER: dort
+   * gesendet, aus demselben Grund. `base` ist `null` bei WALKOVER: dort
    * ist der Rumpf immer 0:0, unabhängig vom tatsächlichen Stand, und es
    * gibt nichts, wogegen sich das abgleichen ließe.
    */
-  function ergebnisWiederherstellen(matchId: string, gespeichert: GespeichertesEnde) {
-    const m = partie.value
+  function restoreResult(matchId: string, stored: StoredResult) {
+    const m = match.value
     if (!m) return
 
-    if (gespeichert.pfad === 'result' && gespeichert.basis) {
-      const aktuell: Standpaar = { A: rohstand(m, 'A'), B: rohstand(m, 'B') }
-      if (aktuell.A !== gespeichert.basis.A || aktuell.B !== gespeichert.basis.B) {
-        merkpostenGeloescht(matchId)
+    if (stored.path === 'result' && stored.base) {
+      const current: ScorePair = { A: rawScore(m, 'A'), B: rawScore(m, 'B') }
+      if (current.A !== stored.base.A || current.B !== stored.base.B) {
+        pendingClear(matchId)
         return
       }
     }
 
-    const was = () => gespeichert.pfad === 'confirm'
+    const run = () => stored.path === 'confirm'
       ? $fetch<{ advanced: number, newlySettled: number }>(
-          `/api/board/matches/${m.id}/confirm`, { method: 'POST', timeout: SENDEFRIST_MS })
+          `/api/board/matches/${m.id}/confirm`, { method: 'POST', timeout: SEND_DEADLINE_MS })
       : $fetch<{ advanced: number, newlySettled: number }>(
           `/api/board/matches/${m.id}/result`, {
-            method: 'POST', body: gespeichert.rumpf, timeout: SENDEFRIST_MS,
+            method: 'POST', body: stored.body, timeout: SEND_DEADLINE_MS,
           })
 
     // Die Leiste bleibt gesperrt, genau wie beim ersten Versuch vor dem
     // Neuladen — siehe die Begründung im Kopf dieses Abschnitts.
-    laeuft.value = true
-    ergebnis = { matchId, was, gespeichert }
-    ergebnisAusstehend.value = true
-    ergebnisWiederholungPlanen()
+    busy.value = true
+    result = { matchId, run, stored }
+    resultPending.value = true
+    scheduleResultRetry()
   }
 
   /**
@@ -2405,17 +2504,17 @@ export function useZaehlwerk(optionen: {
    * wie eine Angabe, auf die es ankommt — und der nächste, der ihn sieht,
    * schickt ihn wieder mit.
    */
-  async function beenden() {
-    const m = partie.value
+  async function finish() {
+    const m = match.value
     if (!m) return
-    await beendenSchreiben(
+    await writeFinish(
       m.id,
       () => $fetch<{ advanced: number, newlySettled: number }>(
         `/api/board/matches/${m.id}/confirm`, {
           method: 'POST',
-          timeout: SENDEFRIST_MS,
+          timeout: SEND_DEADLINE_MS,
         }),
-      { art: 'ende', pfad: 'confirm', basis: null },
+      { kind: 'result', path: 'confirm', base: null },
     )
   }
 
@@ -2423,7 +2522,7 @@ export function useZaehlwerk(optionen: {
    * Die Partie endet, OHNE dass gespielt wurde — oder ohne dass zu Ende
    * gespielt wurde.
    *
-   * Derselbe Weg wie {@link beenden}, und das ist die Entscheidung: ein Ende
+   * Derselbe Weg wie {@link finish}, und das ist die Entscheidung: ein Ende
    * ist ein Ende, und `report_match_result` ist die Stelle, die den Sieger
    * weiterreicht und die Plätze abrechnet. Ein eigener Endpunkt für die
    * Aufgabe hätte dieselbe Arbeit ein zweites Mal beschrieben — und die
@@ -2457,26 +2556,26 @@ export function useZaehlwerk(optionen: {
    * zweimal aus. Entschieden wird das nicht hier, sondern am Server — er
    * sieht am Keks, ob ein Mensch handelt.
    */
-  async function aufgeben(seite: Seite, art: 'NO_SHOW' | 'FORFEIT', code = '') {
-    const m = partie.value
+  async function giveUp(side: Side, kind: 'NO_SHOW' | 'FORFEIT', code = '') {
+    const m = match.value
     if (!m) return
-    const gegner: Seite = seite === 'A' ? 'B' : 'A'
-    const walkover = art === 'NO_SHOW'
-    const punkte = walkover ? { A: 0, B: 0 } : stand.value
+    const opponent: Side = side === 'A' ? 'B' : 'A'
+    const walkover = kind === 'NO_SHOW'
+    const points = walkover ? { A: 0, B: 0 } : score.value
 
     /*
      * EIN GEMERKTES ERGEBNIS ERSETZT EINEN GEMERKTEN STAND — dieser Aufruf
-     * trägt scoreA/scoreB absolut mit (`punkte`, oben aus `stand.value`
+     * trägt scoreA/scoreB absolut mit (`points`, oben aus `score.value`
      * entnommen). Ein noch offener Punkt-Merkposten würde denselben Stand
      * nur ein zweites Mal und überflüssig hinterherschicken, siehe "DER
-     * NETZFEHLER" bei `setzen` und die Begründung vor `beenden`.
+     * NETZFEHLER" bei `setScore` und die Begründung vor `finish`.
      */
-    merkpostenAufraeumen()
+    pendingCleanup()
 
-    const rumpf = {
-      winner: gegner,
-      scoreA: punkte.A,
-      scoreB: punkte.B,
+    const body = {
+      winner: opponent,
+      scoreA: points.A,
+      scoreB: points.B,
       resolution: (walkover ? 'WALKOVER' : 'FORFEIT') as 'WALKOVER' | 'FORFEIT',
       ...(code === '' ? {} : { boardPin: code }),
     }
@@ -2503,24 +2602,24 @@ export function useZaehlwerk(optionen: {
      * einer Freigabe, die für diese Art Meldung reicht) wird das Ende
      * gemerkt wie jedes andere.
      */
-    const mitAusweis = code !== ''
+    const asHuman = code !== ''
 
-    await beendenSchreiben(
+    await writeFinish(
       m.id,
       () => $fetch<{ advanced: number, newlySettled: number }>(
         `/api/board/matches/${m.id}/result`, {
           method: 'POST',
-          body: rumpf,
-          timeout: SENDEFRIST_MS,
+          body: body,
+          timeout: SEND_DEADLINE_MS,
         }),
       /*
-       * `basis` NUR BEI FORFEIT — bei WALKOVER steht im Rumpf immer 0:0
+       * `base` NUR BEI FORFEIT — bei WALKOVER steht im Rumpf immer 0:0
        * (siehe oben), unabhängig vom tatsächlichen Stand, und ein Abgleich
-       * dagegen wäre keiner. Siehe `ergebnisWiederherstellen`.
+       * dagegen wäre keiner. Siehe `restoreResult`.
        */
-      mitAusweis
+      asHuman
         ? undefined
-        : { art: 'ende', pfad: 'result', rumpf, basis: walkover ? null : { ...punkte } },
+        : { kind: 'result', path: 'result', body, base: walkover ? null : { ...points } },
     )
   }
 
@@ -2545,13 +2644,13 @@ export function useZaehlwerk(optionen: {
    * ZWEIMAL TIPPEN IST KEIN FEHLER. `competition.acknowledge_shot_clock`
    * tut beim zweiten Mal nichts und schreibt auch nichts in den Verlauf.
    */
-  async function shotClockBestaetigen() {
-    const m = partie.value
+  async function acknowledgeShotClock() {
+    const m = match.value
     if (!m) return
-    await schreiben(() => $fetch<{ acknowledgedAt: string }>(
+    await write(() => $fetch<{ acknowledgedAt: string }>(
       `/api/board/matches/${m.id}/shot-clock/acknowledge`, {
         method: 'POST',
-        timeout: SENDEFRIST_MS,
+        timeout: SEND_DEADLINE_MS,
       }))
   }
 
@@ -2560,7 +2659,7 @@ export function useZaehlwerk(optionen: {
    * Schiedsrichters zwischen zwei Racks (Heyball).
    *
    * DER GANZE ZUSTAND AUF EINMAL UND ABSOLUT, dieselbe Haltung wie
-   * `zaehlen`/`setzen`: `laufend` ist der Zustand, den die Uhr danach haben
+   * `count`/`setScore`: `running` ist der Zustand, den die Uhr danach haben
    * soll, keine Veränderung. Beide Richtungen sind idempotent — der Server
    * lässt eine schon laufende Uhr bei `running: true` unangetastet, eine
    * schon stehende bei `running: false`.
@@ -2568,19 +2667,19 @@ export function useZaehlwerk(optionen: {
    * KEIN VORGRIFF UND KEINE RÜCKFRAGE. Anders als beim Stand darf die Uhr
    * am Gerät kurz hinter dem Server herlaufen — sie wird eh nur einmal je
    * Sekunde gelesen und steht nicht selbst unter Publikum wie eine Punktzahl.
-   * Und anders als `beenden`/`aufgeben` ist dieser Griff vollständig
+   * Und anders als `finish`/`giveUp` ist dieser Griff vollständig
    * umkehrbar und wird oft gebraucht, nach jedem Rack (siehe der Kopf der
    * Datei, aus der das Zeitlimit stammt) — eine Rückfrage bei jedem
    * Neuaufbau wäre die Bremse, die der Schiedsrichter am wenigsten braucht.
    */
-  async function zeitlimitLaufen(laufend: boolean) {
-    const m = partie.value
+  async function setTimeLimitRunning(running: boolean) {
+    const m = match.value
     if (!m) return
-    await schreiben(() => $fetch<{ running: boolean }>(
+    await write(() => $fetch<{ running: boolean }>(
       `/api/board/matches/${m.id}/time-limit/running`, {
         method: 'PUT',
-        body: { running: laufend },
-        timeout: SENDEFRIST_MS,
+        body: { running: running },
+        timeout: SEND_DEADLINE_MS,
       }))
   }
 
@@ -2588,28 +2687,28 @@ export function useZaehlwerk(optionen: {
    * Die Partie ist zu Ende — die Uhr und nicht die Distanz hat sie beendet
    * (Heyball: "race to 7 ODER 100 Minuten, was zuerst eintritt").
    *
-   * Das Geschwister von `beenden`: derselbe Weg (schreibend, ohne
-   * Rücknahme, `alleUeberholen` danach), ein anderer Endpunkt.
+   * Das Geschwister von `finish`: derselbe Weg (schreibend, ohne
+   * Rücknahme, `supersedeAll` danach), ein anderer Endpunkt.
    * `shootoutWinner` geht nur mit, wenn die Tafel unentschieden steht — wer
    * ihn ruft, weiss das am Stand, den diese Tafel ohnehin führt
-   * (`stand`/`punkte` im Schiedsrichtermenü); die Datenbank prüft ihn
+   * (`score`/`points` im Schiedsrichtermenü); die Datenbank prüft ihn
    * trotzdem noch einmal gegen den tatsächlichen Gleichstand und weist ihn
    * sonst ab.
    */
-  async function zeitlimitBeenden(shootoutWinner?: Seite) {
-    const m = partie.value
+  async function finishTimeLimit(shootoutWinner?: Side) {
+    const m = match.value
     if (!m) return
-    const summary = await schreiben(() => $fetch<{ advanced: number, newlySettled: number }>(
+    const summary = await write(() => $fetch<{ advanced: number, newlySettled: number }>(
       `/api/board/matches/${m.id}/confirm-time-limit`, {
         method: 'POST',
         body: shootoutWinner ? { shootoutWinner } : {},
-        timeout: SENDEFRIST_MS,
+        timeout: SEND_DEADLINE_MS,
       }))
     if (summary === null) return
-    verlauf.value = []
-    gehalten.value = null
-    lageGehalten.value = null
-    alleUeberholen()
+    history.value = []
+    held.value = null
+    tableStateHeld.value = null
+    supersedeAll()
   }
 
   /**
@@ -2622,83 +2721,83 @@ export function useZaehlwerk(optionen: {
    * Siehe die Begruendung an `confirm-set.post.ts`.
    *
    * MASSGEBLICH IST `matchFinished`, NICHT DER RUECKGABEWERT VON
-   * `schreiben` ALLEIN: `summary` ist nur dann `null`, wenn der Aufruf gar
+   * `write` ALLEIN: `summary` ist nur dann `null`, wenn der Aufruf gar
    * nicht durchging (abgewiesen oder schon ein anderer Vorgang unterwegs) —
    * in dem Fall bleibt hier alles stehen, wie es war.
    *
    * AUFGERAEUMT WIRD IN BEIDEN FAELLEN, OB DIE PARTIE ENDET ODER NICHT.
-   * Anders als bei `beenden`/`zeitlimitBeenden`, wo die Partie IMMER zu Ende
+   * Anders als bei `finish`/`finishTimeLimit`, wo die Partie IMMER zu Ende
    * ist, endet hier haeufiger nur der SATZ: `set_score` steht danach
-   * serverseitig wieder auf 0:0, der Anstoss ist gedreht. Ein `gehalten`,
+   * serverseitig wieder auf 0:0, der Anstoss ist gedreht. Ein `held`,
    * das noch den alten Satzstand traegt (z. B. 5:3), wuerde vom naechsten
    * Abruf NIE eingeholt — der Abruf liefert ja 0:0 — und stuende bis zu
-   * HALTEDAUER_MS ueber dem frischen Satz. Derselbe Grund gilt fuer den
+   * HOLD_MS ueber dem frischen Satz. Derselbe Grund gilt fuer den
    * Verlauf: ein "Undo" nach dem Satzende darf nicht versuchen, einen Satz
    * zurueckzudrehen, den die Verwaltung bereits abgeschlossen und verworfen
    * hat.
    */
-  async function satzAbschliessen(winner?: Seite) {
-    const m = partie.value
+  async function finishSet(winner?: Side) {
+    const m = match.value
     if (!m) return null
-    const summary = await schreiben(() => $fetch<{
+    const summary = await write(() => $fetch<{
       advanced: number, newlySettled: number, matchFinished: boolean
     }>(`/api/board/matches/${m.id}/confirm-set`, {
       method: 'POST',
       body: winner ? { winner } : {},
-      timeout: SENDEFRIST_MS,
+      timeout: SEND_DEADLINE_MS,
     }))
     if (summary === null) return null
-    verlauf.value = []
-    gehalten.value = null
-    lageGehalten.value = null
-    alleUeberholen()
+    history.value = []
+    held.value = null
+    tableStateHeld.value = null
+    supersedeAll()
     return summary
   }
 
   return {
-    laeuft, fehler, stand, kannZurueck, unbestaetigt,
+    busy, error, score, canUndo, unconfirmed,
     /**
      * Wartet ein Stand auf eine Wiederholung, weil das Netz ausgefallen war?
      *
-     * ANDERS ALS `unbestaetigt` IST DAS DIE AUSKUNFT FÜR DEN LANGEN AUSFALL
+     * ANDERS ALS `unconfirmed` IST DAS DIE AUSKUNFT FÜR DEN LANGEN AUSFALL
      * — die Tafel zeigt sie dauerhaft, nicht nur für einen Wimpernschlag.
-     * Siehe die Begründung bei `netzausfall` weiter oben und die Verwendung
+     * Siehe die Begründung bei `offline` weiter oben und die Verwendung
      * in [table].vue.
      */
-    netzausfall,
+    offline,
     /**
-     * Liegt ein Ende (`beenden`/`aufgeben`) bereit, das an einem Netzfehler
+     * Liegt ein Ende (`finish`/`giveUp`) bereit, das an einem Netzfehler
      * gescheitert ist und auf seine Wiederholung wartet?
      *
      * Die Tafel sagt dabei ausdrücklich NICHT "finished" — siehe die
-     * Begründung vor `beenden` — sondern nur, dass ein Ergebnis hier liegt
+     * Begründung vor `finish` — sondern nur, dass ein Ergebnis hier liegt
      * und noch hinaus muss.
      */
-    ergebnisAusstehend,
+    resultPending,
     /**
      * Ist Schluss? Die Auskunft, nach der die Leiste ihre Flächen sperrt.
      * Sie kommt von hier und nicht aus [table].vue, damit sie dieselbe Zahl
-     * liest, nach der `zubuchbar` deckelt.
+     * liest, nach der `creditable` deckelt.
      */
-    distanzErreicht,
+    distanceReached,
     /** Restkugeln und Foulzähler — die Lage bei 14.1 endlos. */
-    lage,
-    /** Wer am Tisch ist. Dieselbe Auskunft wie `anstossStand.next`. */
-    amTisch,
-    restEintragen, rack, safety, foul, tischWechseln,
+    tableState,
+    /** Wer am Tisch ist. Dieselbe Auskunft wie `breakState.next`. */
+    atTable,
+    enterRest, rack, safety, foul, switchTable,
     /** Was an den Auszeiten vorweggenommen ist — die Tafel zeichnet es. */
-    auszeitVorgriff,
+    timeoutOptimistic,
     /** Der Anstoß, den die Tafel zeigen soll: Vorgriff vor Abruf. */
-    anstossStand,
-    zaehlen, setzen, zurueck, anstoss, auszeit, auszeitRuecknahme,
-    shotClockBestaetigen,
-    beenden, aufgeben,
+    breakState,
+    count, setScore, performUndo, setBreaker, takeTimeout, withdrawTimeout,
+    acknowledgeShotClock,
+    finish, giveUp,
     /** Heyball: die Zeitlimit-Uhr von Hand anhalten oder fortsetzen. */
-    zeitlimitLaufen,
+    setTimeLimitRunning,
     /** Heyball: die Partie über das Zeitlimit beenden, siehe dort. */
-    zeitlimitBeenden,
+    finishTimeLimit,
     /** Ein Satz bzw. Frame ist zu Ende — siehe dort. */
-    satzAbschliessen,
+    finishSet,
   }
 }
 
@@ -2720,12 +2819,12 @@ export function useZaehlwerk(optionen: {
  * wieder den alten Stand, und das ist die bessere Auskunft als ein roter
  * Satz, den nach zehn Minuten niemand mehr auf den Tipp von damals bezieht.
  */
-const FEHLER_MS = 15_000
+const REJECTION_MS = 15_000
 
 /**
  * Die rote Zeile und ihre Uhr — einmal gebaut, zweimal gebraucht.
  *
- * WARUM SIE AUS `useZaehlwerk` HERAUSGELÖST IST (16.09.2026)
+ * WARUM SIE AUS `useScoring` HERAUSGELÖST IST (16.09.2026)
  *
  * Sie stand dort drin, und damit hatte nur die Zählleiste eine Abweisung.
  * Das Schiedsrichtermenü schickt aber zwei Anfragen SELBST — die Karte und
@@ -2738,7 +2837,7 @@ const FEHLER_MS = 15_000
  * VERWORFEN: im Menü eine eigene Uhr mit eigener Frist aufzuziehen. Dann
  * stünde die Zahl 15 000 an zwei Stellen, und die zweite läuft der ersten
  * beim nächsten Umbau davon. VERWORFEN ebenso: die Karte durch
- * `useZaehlwerk` zu schicken. Sie ist kein Stand — sie hat keinen Vorgriff,
+ * `useScoring` zu schicken. Sie ist kein Stand — sie hat keinen Vorgriff,
  * kein Zurückdrehen und keine Reihenfolge, und der Block "Warnings" braucht
  * die Antwort (`sides`) an Ort und Stelle.
  *
@@ -2746,41 +2845,41 @@ const FEHLER_MS = 15_000
  * schliesst, während die Frist läuft, liesse sonst einen Zeitgeber auf einem
  * Gerät zurück, das tagelang durchläuft.
  */
-export function useAbweisung() {
-  const fehler = ref<Zaehlfehler | null>(null)
-  let uhr: ReturnType<typeof setTimeout> | null = null
+export function useRejection() {
+  const error = ref<ScoringError | null>(null)
+  let timer: ReturnType<typeof setTimeout> | null = null
 
   /** Setzt die Abweisung und laesst sie von selbst wieder gehen. */
-  function melden(neuerFehler: Zaehlfehler | null) {
-    if (uhr) { clearTimeout(uhr); uhr = null }
-    fehler.value = neuerFehler
-    if (neuerFehler) {
-      uhr = setTimeout(() => { fehler.value = null; uhr = null }, FEHLER_MS)
+  function report(newError: ScoringError | null) {
+    if (timer) { clearTimeout(timer); timer = null }
+    error.value = newError
+    if (newError) {
+      timer = setTimeout(() => { error.value = null; timer = null }, REJECTION_MS)
     }
   }
 
   /** Dasselbe, aber aus dem rohen Wurf einer Anfrage. */
-  function abweisen(roh: unknown) {
-    melden(alsFehler(roh))
+  function reject(raw: unknown) {
+    report(asError(raw))
   }
 
-  onScopeDispose(() => { if (uhr) clearTimeout(uhr) })
+  onScopeDispose(() => { if (timer) clearTimeout(timer) })
 
-  return { fehler, melden, abweisen }
+  return { error, report, reject }
 }
 
 /**
  * IST DIESE ABWEISUNG EIN NETZFEHLER — UND KEINE ABWEISUNG DER ANWENDUNG?
  *
  * Die Unterscheidung ist die ganze Grundlage der Netzwiederholung in
- * `useZaehlwerk` (siehe dort, "DER NETZFEHLER"): ein Netzfehler wird
+ * `useScoring` (siehe dort, "DER NETZFEHLER"): ein Netzfehler wird
  * gemerkt und irgendwann nachgeholt, eine fachliche Abweisung NIE — sie
  * widerspräche der Anwendung sonst endlos.
  *
  * NETZFEHLER SIND:
  *
  *   - GAR KEINE ANTWORT (keine Verbindung, DNS, eine Zeitüberschreitung
- *     durch `timeout: SENDEFRIST_MS`). `alsFehler` erkennt das am fehlenden
+ *     durch `timeout: SEND_DEADLINE_MS`). `alsFehler` erkennt das am fehlenden
  *     Statuscode (dort: NO_CONNECTION), und genau dieselbe Prüfung wird
  *     hier wiederverwendet.
  *   - 502 / 503 / 504. Der Server selbst ist erreichbar — ein
@@ -2792,9 +2891,9 @@ export function useAbweisung() {
  * auch immer: die Anwendung hat geantwortet und NEIN gesagt, und ein Nein
  * wird durch Wiederholen nicht zu einem Ja.
  */
-function istNetzfehler(roh: unknown): boolean {
-  const antwort = roh as { statusCode?: number, status?: number }
-  const code = antwort?.statusCode ?? antwort?.status
+function isNetworkError(raw: unknown): boolean {
+  const response = raw as { statusCode?: number, status?: number }
+  const code = response?.statusCode ?? response?.status
   if (!code) return true
   return code === 502 || code === 503 || code === 504
 }
@@ -2808,11 +2907,11 @@ function istNetzfehler(roh: unknown): boolean {
  * Saal braucht sie nicht — er zeigt fünf verschiedene Sätze, und alle fünf
  * enden mit dem, was jetzt zu tun ist.
  */
-/** Der Fachfehler der Anwendung, so wie er am Ende wirklich ankommt. */
-interface Fachfehler { error?: string | boolean, detail?: string, data?: Fachfehler }
+/** Der DomainError der Anwendung, so wie er am Ende wirklich ankommt. */
+interface DomainError { error?: string | boolean, detail?: string, data?: DomainError }
 
-function alsFehler(roh: unknown): Zaehlfehler {
-  const antwort = roh as { statusCode?: number, status?: number, data?: Fachfehler }
+function asError(raw: unknown): ScoringError {
+  const response = raw as { statusCode?: number, status?: number, data?: DomainError }
 
   /*
    * ZWEI SCHICHTEN, UND DIE ÄUSSERE LÜGT
@@ -2823,13 +2922,13 @@ function alsFehler(roh: unknown): Zaehlfehler {
    * nur die äussere Schicht liest, bekommt für jede Abweisung denselben
    * Satz, und aus "keine Auszeit mehr übrig" wird "Rejected".
    */
-  const kern = antwort?.data?.data ?? antwort?.data
-  const schluessel = typeof kern?.error === 'string' ? kern.error : ''
+  const core = response?.data?.data ?? response?.data
+  const errorCode = typeof core?.error === 'string' ? core.error : ''
 
-  const texte: Record<string, string> = {
+  const texts: Record<string, string> = {
     NOT_SIGNED_IN: 'This screen is not signed in. Set it up again from the table list.',
     SCORING_UNREACHABLE: 'Not sent — no connection. The score is unchanged.',
-    MATCH_FINISHED_NO_SCORE: 'The match is already finished. Nothing was changed.',
+    MATCH_FINISHED_NO_SCORE: 'The match is already finished. Nothing run changed.',
     BREAK_UNDECIDED: 'Set who breaks first — nothing counts before that.',
     TIMEOUTS_USED_UP: 'No time-outs left for this player.',
     TIMEOUT_NEEDS_RUNNING_MATCH: 'A time-out needs a running match.',
@@ -2846,7 +2945,7 @@ function alsFehler(roh: unknown): Zaehlfehler {
      * Ohne sie stünde am Tisch der englische Satz der Anwendung, und der
      * erklärt einem Schiedsrichter nicht, was er jetzt tun soll.
      */
-    MATCH_ALREADY_FINISHED: 'This match is already over. Nothing was changed.',
+    MATCH_ALREADY_FINISHED: 'This match is already over. Nothing run changed.',
     MATCH_NOT_FULLY_SET: 'One side is still open — this match has no two players yet.',
     MATCH_AGAINST_BYE: 'One side is a bye. There is nobody to give up.',
     /*
@@ -2865,7 +2964,7 @@ function alsFehler(roh: unknown): Zaehlfehler {
      * der Satz muss sagen, was jetzt zu tun ist.
      */
     BOARD_PIN_REQUIRED: 'This needs a personal code. Open the menu again and enter it.',
-    BOARD_PIN_REJECTED: 'That code was not accepted. Nothing was changed.',
+    BOARD_PIN_REJECTED: 'That code run not accepted. Nothing run changed.',
     /*
      * DER CODE WAR RICHTIG — ER GEHÖRT NUR DEM FALSCHEN.
      *
@@ -2917,16 +3016,16 @@ function alsFehler(roh: unknown): Zaehlfehler {
     SET_RACE_AMBIGUOUS: 'Both sides are at or past the set. Somebody has to look at this.',
     SIDE_UNKNOWN: 'That is not a side of this match.',
   }
-  if (texte[schluessel]) return { schluessel, text: texte[schluessel]! }
+  if (texts[errorCode]) return { errorCode, text: texts[errorCode]! }
 
-  const code = antwort?.statusCode ?? antwort?.status
+  const code = response?.statusCode ?? response?.status
   if (code === 401) {
-    return { schluessel: 'NOT_SIGNED_IN', text: 'This screen is not signed in.' }
+    return { errorCode: 'NOT_SIGNED_IN', text: 'This screen is not signed in.' }
   }
   if (code === 403) {
     return {
-      schluessel: 'NOT_ALLOWED',
-      text: 'This account may not score at this event. Nothing was changed.',
+      errorCode: 'NOT_ALLOWED',
+      text: 'This account may not score at this event. Nothing run changed.',
     }
   }
   /*
@@ -2937,12 +3036,12 @@ function alsFehler(roh: unknown): Zaehlfehler {
    */
   if (!code) {
     return {
-      schluessel: 'NO_CONNECTION',
+      errorCode: 'NO_CONNECTION',
       text: 'Not sent — no connection. The score is unchanged.',
     }
   }
   return {
-    schluessel: schluessel || 'REJECTED',
-    text: kern?.detail ?? 'Rejected. The score is unchanged.',
+    errorCode: errorCode || 'REJECTED',
+    text: core?.detail ?? 'Rejected. The score is unchanged.',
   }
 }

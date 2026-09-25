@@ -14,12 +14,12 @@
  * Adressleiste und ohne Browserleisten startet.
  */
 const route = useRoute()
-const istTafel = computed(() => route.path === '/board' || route.path.startsWith('/board/'))
+const isBoard = computed(() => route.path === '/board' || route.path.startsWith('/board/'))
 
 useHead({ htmlAttrs: { lang: 'en' } })
 
 useHead(computed(() => {
-  if (!istTafel.value) return {}
+  if (!isBoard.value) return {}
 
   return {
     link: [

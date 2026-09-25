@@ -35,7 +35,7 @@ const props = defineProps<{
    * In der Fußzeile brauchte sie außerdem den Namen ein zweites Mal und
    * war damit so breit, dass sie die Zeile umbrach.
    */
-  timeout?: { text: string, ueberzogen: boolean } | null
+  timeout?: { text: string, overrun: boolean } | null
   /**
    * DIE AUFNAHME DIESER SEITE BEI 14.1 ENDLOS — laufend und höchste.
    *
@@ -47,7 +47,7 @@ const props = defineProps<{
    * die seit fünf Minuten steht und trotzdem „läuft" heisst. Der High run
    * steht bei beiden — er ist die Zahl, die im Saal verglichen wird.
    */
-  aufnahme?: { lauf: number | null, high: number } | null
+  inning?: { current: number | null, high: number } | null
 }>()
 
 /**
@@ -55,7 +55,7 @@ const props = defineProps<{
  * sind: "van den Berg" ist ein Nachname und nicht "Berg" mit dem Vornamen
  * "Nick van den".
  */
-const NAMENSPARTIKEL = new Set([
+const NAME_PARTICLES = new Set([
   'van', 'von', 'de', 'del', 'della', 'di', 'da', 'das', 'dos', 'du', 'der',
   'den', 'la', 'le', 'les', 'ten', 'ter', 'af', 'av', 'al', 'bin', 'bint',
   'mac', 'mc', 'op', 'st',
@@ -93,19 +93,19 @@ const NAMENSPARTIKEL = new Set([
  * zusätzlich erkannt wird: eine Platzhalterseite hat keine `playerId`, ein
  * anonymisierter Spieler trägt `erased`.
  */
-const namensteile = computed(() => {
-  const ganz = props.side.displayName.trim()
-  if (!props.side.playerId || props.side.erased) return { nachname: ganz, vorname: '' }
+const nameParts = computed(() => {
+  const full = props.side.displayName.trim()
+  if (!props.side.playerId || props.side.erased) return { familyName: full, givenName: '' }
 
-  const nachname = props.side.familyName?.trim()
-  if (nachname) return { nachname, vorname: props.side.givenName?.trim() ?? '' }
+  const familyName = props.side.familyName?.trim()
+  if (familyName) return { familyName, givenName: props.side.givenName?.trim() ?? '' }
 
-  const teile = ganz.split(/\s+/)
-  if (teile.length < 2) return { nachname: ganz, vorname: '' }
+  const parts = full.split(/\s+/)
+  if (parts.length < 2) return { familyName: full, givenName: '' }
 
-  let i = teile.length - 1
-  while (i > 1 && NAMENSPARTIKEL.has((teile[i - 1] ?? '').toLowerCase())) i--
-  return { nachname: teile.slice(i).join(' '), vorname: teile.slice(0, i).join(' ') }
+  let i = parts.length - 1
+  while (i > 1 && NAME_PARTICLES.has((parts[i - 1] ?? '').toLowerCase())) i--
+  return { familyName: parts.slice(i).join(' '), givenName: parts.slice(0, i).join(' ') }
 })
 
 /**
@@ -147,9 +147,9 @@ const namensteile = computed(() => {
  * Namen alle zehn Sekunden. Gerechnet wird serverseitig genauso wie im
  * Browser, und der Name steht beim ersten Bild richtig.
  */
-function schriftmass(text: string, hoeheCqh: number, breiteCqw: number, dichte: number): string {
-  const zeichen = Math.max(text.trim().length, 1)
-  return `min(${hoeheCqh}cqh, ${(breiteCqw / (zeichen * dichte)).toFixed(2)}cqw)`
+function fontSize(text: string, heightCqh: number, widthCqw: number, density: number): string {
+  const chars = Math.max(text.trim().length, 1)
+  return `min(${heightCqh}cqh, ${(widthCqw / (chars * density)).toFixed(2)}cqw)`
 }
 
 /*
@@ -166,8 +166,8 @@ function schriftmass(text: string, hoeheCqh: number, breiteCqw: number, dichte: 
  * 94 statt der vollen 100 cqw aus demselben Grund: ein Name soll die Spalte
  * füllen und nicht an ihr kleben.
  */
-const nachnameMass = computed(() =>
-  schriftmass(namensteile.value.nachname, 11, 94, 0.84))
+const familyNameFontSize = computed(() =>
+  fontSize(nameParts.value.familyName, 11, 94, 0.84))
 
 /*
  * Der Vorname, gemischt gesetzt, Gewicht 500: gemessen 0,565 (Konstantin)
@@ -180,9 +180,9 @@ const nachnameMass = computed(() =>
  * Breite, beim kurzen Vornamen aber die Höhe, und "Sandra" stand doppelt so
  * groß da wie "BAUMGARTNER".
  */
-const vornameMass = computed(() =>
-  `min(${schriftmass(namensteile.value.vorname, 6, 92, 0.69)}, `
-  + `calc(0.58 * ${nachnameMass.value}))`)
+const givenNameFontSize = computed(() =>
+  `min(${fontSize(nameParts.value.givenName, 6, 92, 0.69)}, `
+  + `calc(0.58 * ${familyNameFontSize.value}))`)
 
 /**
  * Der Stand ist das größte Element der Tafel, und zwar mit Abstand — er
@@ -191,7 +191,7 @@ const vornameMass = computed(() =>
  * Aufgabe "FF" und bei einer Disqualifikation "DIS", und drei Zeichen in
  * voller Höhe stünden über dem Kastenrand.
  */
-const standMass = computed(() =>
+const scoreFontSize = computed(() =>
   /*
    * 64 cqw als zweite Schranke, und nicht nur die 42 cqh: hochkant ist die
    * Spalte schmal und hoch, und ohne die Schranke stießen die beiden Stände
@@ -199,10 +199,10 @@ const standMass = computed(() =>
    * Höhe das knappere Maß. Dichte 0,67 deckt die schmalste Möglichkeit ab
    * (die einzelne "0" misst 0,662 em; "DIS" braucht je Zeichen nur 0,581).
    */
-  `min(64cqw, ${schriftmass(props.side.displayScore || '0', 42, 94, 0.67)})`)
+  `min(64cqw, ${fontSize(props.side.displayScore || '0', 42, 94, 0.67)})`)
 
 /** Verband vor Staatsangehörigkeit — dieselbe Regel wie in ScoreCard. */
-const land = computed(() => props.side.representsCountry ?? props.side.nationality)
+const country = computed(() => props.side.representsCountry ?? props.side.nationality)
 </script>
 
 <template>
@@ -214,7 +214,7 @@ const land = computed(() => props.side.representsCountry ?? props.side.nationali
       Stand, weil sie den nächsten Stoß ankündigt.
     -->
     <div class="seite__kopf">
-      <p class="seite__stand" :style="{ fontSize: standMass }">
+      <p class="seite__stand" :style="{ fontSize: scoreFontSize }">
         {{ side.displayScore || '0' }}
         <!--
           DER SHOOT-OUT-PUNKT — als Zeichen ÜBER der Zahl und nicht als neue
@@ -266,20 +266,20 @@ const land = computed(() => props.side.representsCountry ?? props.side.nationali
         eine verändert sich vor den Augen des Publikums, die andere steht.
       -->
       <p
-        v-if="aufnahme"
+        v-if="inning"
         class="seite__lauf"
-        :class="{ 'seite__lauf--leer': !aufnahme.lauf && !aufnahme.high }"
+        :class="{ 'seite__lauf--leer': !inning.current && !inning.high }"
       >
-        <span v-if="aufnahme.lauf" class="seite__lauf-jetzt">Run {{ aufnahme.lauf }}</span>
-        <span v-if="aufnahme.high" class="seite__lauf-high">High {{ aufnahme.high }}</span>
+        <span v-if="inning.current" class="seite__lauf-jetzt">Run {{ inning.current }}</span>
+        <span v-if="inning.high" class="seite__lauf-high">High {{ inning.high }}</span>
         <!-- Der Platzhalter trägt die Höhe, wenn beide Zahlen fehlen. -->
-        <span v-if="!aufnahme.lauf && !aufnahme.high" class="seite__lauf-high">High 0</span>
+        <span v-if="!inning.current && !inning.high" class="seite__lauf-high">High 0</span>
       </p>
 
       <p
         v-if="timeout"
         class="seite__auszeit"
-        :class="{ 'seite__auszeit--ueber': timeout.ueberzogen }"
+        :class="{ 'seite__auszeit--ueber': timeout.overrun }"
       >
         Time out {{ timeout.text }}
       </p>
@@ -291,12 +291,12 @@ const land = computed(() => props.side.representsCountry ?? props.side.nationali
       aus der Entfernung früher erkannt wird als der Name.
     -->
     <div class="seite__fuss">
-      <UiCountryTag :country="land" class="seite__flagge" />
-      <p class="seite__nachname" :style="{ fontSize: nachnameMass }">
-        {{ namensteile.nachname }}
+      <UiCountryTag :country="country" class="seite__flagge" />
+      <p class="seite__nachname" :style="{ fontSize: familyNameFontSize }">
+        {{ nameParts.familyName }}
       </p>
-      <p v-if="namensteile.vorname" class="seite__vorname" :style="{ fontSize: vornameMass }">
-        {{ namensteile.vorname }}
+      <p v-if="nameParts.givenName" class="seite__vorname" :style="{ fontSize: givenNameFontSize }">
+        {{ nameParts.givenName }}
       </p>
     </div>
   </div>
@@ -394,7 +394,7 @@ const land = computed(() => props.side.representsCountry ?? props.side.nationali
 /*
  * DAS SHOOT-OUT-ZEICHEN — absolut über der Zahl, kostet keine cqh.
  *
- * Feste kleine Größe und nicht an `standMass` gebunden: die Zahl reicht von
+ * Feste kleine Größe und nicht an `scoreFontSize` gebunden: die Zahl reicht von
  * einer Ziffer bis "DIS", und das Zeichen soll bei jeder Größe gleich klein
  * und gleich lesbar bleiben.
  */

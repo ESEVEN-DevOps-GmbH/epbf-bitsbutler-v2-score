@@ -14,7 +14,7 @@
  * Schiedsrichter am Tisch, und er sagt es ausdruecklich.
  *
  * MASSGEBLICH IST `matchFinished`, NICHT `advanced` -- die Tafel (siehe
- * useZaehlwerk.ts, `satzAbschliessen`) liest genau das und nicht das
+ * useScoring.ts, `satzAbschliessen`) liest genau das und nicht das
  * andere: `advanced` ist 0, wenn nichts weitergereicht wurde, und das
  * trifft auf eine beendete Partie genauso zu wie auf einen Satz, nach dem es
  * weitergeht.
@@ -23,13 +23,13 @@ export default defineEventHandler(async (event) => {
   const id = parseId(getRouterParam(event, 'id'), 'Partiekennung')
   const body = await readBody<{ winner?: string } | null>(event)
 
-  const roh = String(body?.winner ?? '').trim().toUpperCase()
-  const sieger = roh === 'A' || roh === 'B' ? roh : undefined
+  const raw = String(body?.winner ?? '').trim().toUpperCase()
+  const winner = raw === 'A' || raw === 'B' ? raw : undefined
 
-  return await anDieVerwaltung<{
+  return await toAdmin<{
     advanced: number, newlySettled: number, matchFinished: boolean
   }>(event, `/matches/${id}/confirm-set`, {
     method: 'POST',
-    body: sieger ? { winner: sieger } : {},
+    body: winner ? { winner } : {},
   })
 })

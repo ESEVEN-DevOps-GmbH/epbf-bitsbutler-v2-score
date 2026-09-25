@@ -38,14 +38,14 @@ export default defineEventHandler(async (event) => {
   const id = parseId(getRouterParam(event, 'id'), 'Partiekennung')
   const body = await readBody<{ side?: string, running?: boolean }>(event)
 
-  const seite = String(body?.side ?? '').trim().toUpperCase()
-  if (seite !== 'A' && seite !== 'B') {
+  const side = String(body?.side ?? '').trim().toUpperCase()
+  if (side !== 'A' && side !== 'B') {
     throw createError({ statusCode: 400, statusMessage: 'Keine Seite' })
   }
 
   return body?.running === true
-    ? await anDieVerwaltung(event, `/matches/${id}/timeout?side=${seite}`,
+    ? await toAdmin(event, `/matches/${id}/timeout?side=${side}`,
         { method: 'DELETE' })
-    : await anDieVerwaltung(event, `/matches/${id}/timeout?side=${seite}`,
+    : await toAdmin(event, `/matches/${id}/timeout?side=${side}`,
         { method: 'POST' })
 })

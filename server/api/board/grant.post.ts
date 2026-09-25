@@ -7,7 +7,7 @@
  * 'Anzeigentafel' maske wo man auch die links kopieren kann einbaut.. mit
  * dem man dann die scoreboard freigeben kann".
  *
- * WARUM DIESE ROUTE NICHT ÜBER `anDieVerwaltung` GEHT
+ * WARUM DIESE ROUTE NICHT ÜBER `toAdmin` GEHT
  *
  * Jene verlangt einen Keks. Hier entsteht der Keks gerade erst — das ist
  * der ganze Vorgang. Und der Keks, den die Verwaltung setzt, gehört ihrer
@@ -44,24 +44,24 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  const tisch = body?.tableNumber
-  if (tisch !== undefined && tisch !== null
-      && (!Number.isInteger(tisch) || tisch < 1 || tisch > 999)) {
+  const tableNumber = body?.tableNumber
+  if (tableNumber !== undefined && tableNumber !== null
+      && (!Number.isInteger(tableNumber) || tableNumber < 1 || tableNumber > 999)) {
     throw createError({ statusCode: 400, statusMessage: 'Keine Tischnummer' })
   }
 
-  const basis = String(process.env.BB_API ?? '')
-  if (!basis) {
+  const base = String(process.env.BB_API ?? '')
+  if (!base) {
     throw createError({ statusCode: 503, statusMessage: 'Scoring not reachable' })
   }
 
-  const antwort = await $fetch.raw<{ outcome: string, tableNumber: number | null }>(
-    `${basis}/api/admin/v1/board/grant`, {
+  const response = await $fetch.raw<{ outcome: string, tableNumber: number | null }>(
+    `${base}/api/admin/v1/board/grant`, {
       method: 'POST',
       body: {
         eventId,
         code,
-        tableNumber: tisch ?? null,
+        tableNumber: tableNumber ?? null,
         label: String(body?.label ?? '').slice(0, 120) || null,
       },
       headers: {
@@ -69,7 +69,7 @@ export default defineEventHandler(async (event) => {
         // Maske der Turnierleitung "Tisch 7, iPad, 10.0.3.12", und daran
         // erkennt sie einen Schirm im Saal wieder, den sie zurücknehmen
         // will. Ohne sie stünde dort überall dieser Server.
-        ...(herkunftskette(event) ? { 'x-forwarded-for': herkunftskette(event)! } : {}),
+        ...(originChain(event) ? { 'x-forwarded-for': originChain(event)! } : {}),
         ...(getHeader(event, 'user-agent')
           ? { 'user-agent': getHeader(event, 'user-agent')! }
           : {}),
@@ -88,20 +88,20 @@ export default defineEventHandler(async (event) => {
     })
   })
 
-  if (antwort.status >= 400) {
-    const ausgang = antwort._data?.outcome ?? 'WRONG_CODE'
+  if (response.status >= 400) {
+    const outcome = response._data?.outcome ?? 'WRONG_CODE'
     throw createError({
-      statusCode: antwort.status,
+      statusCode: response.status,
       statusMessage: 'Rejected',
       data: {
-        error: ausgang,
+        error: outcome,
         // TOO_MANY_DEVICES bekommt seit dem 25.09.2026 einen eigenen Satz:
         // "das war nicht akzeptiert" ist hier die falsche Auskunft — der
         // Code war richtig, nur der Deckel auf gleichzeitig aktive Geraete
         // dieser Veranstaltung ist erreicht (identity.redeem_board_code).
         // Wer das liest, soll zur Turnierleitung gehen und dort ungenutzte
         // Freigaben zuruecknehmen, nicht die Ziffern noch einmal abtippen.
-        detail: ausgang === 'TOO_MANY_DEVICES'
+        detail: outcome === 'TOO_MANY_DEVICES'
           ? 'Too many screens are released for this event. Ask the tournament desk to '
             + 'revoke unused ones.'
           : 'That code was not accepted.',
@@ -118,15 +118,15 @@ export default defineEventHandler(async (event) => {
    * hier noch einmal zu erfinden hiesse, zwei Fristen zu haben, von denen
    * die kürzere gewinnt und niemand weiss, welche das gerade ist.
    */
-  const gesetzt = antwort.headers.get('set-cookie') ?? ''
-  const wert = /bb_board=([^;]*)/.exec(gesetzt)?.[1] ?? ''
-  const frist = Number(/Max-Age=(\d+)/i.exec(gesetzt)?.[1] ?? 0)
+  const setCookieHeader = response.headers.get('set-cookie') ?? ''
+  const value = /bb_board=([^;]*)/.exec(setCookieHeader)?.[1] ?? ''
+  const maxAgeSeconds = Number(/Max-Age=(\d+)/i.exec(setCookieHeader)?.[1] ?? 0)
 
-  if (!wert) {
+  if (!value) {
     throw createError({ statusCode: 502, statusMessage: 'No grant returned' })
   }
 
-  setCookie(event, 'bb_board', wert, {
+  setCookie(event, 'bb_board', value, {
     httpOnly: true,
     sameSite: 'lax',
     // Wortgleich zu server/api/session.post.ts: derselbe Keks auf derselben
@@ -135,11 +135,11 @@ export default defineEventHandler(async (event) => {
     // auseinanderlaufen.
     secure: getRequestURL(event).protocol === 'https:',
     path: '/',
-    maxAge: frist > 0 ? frist : 60 * 60 * 24,
+    maxAge: maxAgeSeconds > 0 ? maxAgeSeconds : 60 * 60 * 24,
   })
 
   return {
-    outcome: antwort._data?.outcome ?? 'SUCCESS',
-    tableNumber: antwort._data?.tableNumber ?? null,
+    outcome: response._data?.outcome ?? 'SUCCESS',
+    tableNumber: response._data?.tableNumber ?? null,
   }
 })

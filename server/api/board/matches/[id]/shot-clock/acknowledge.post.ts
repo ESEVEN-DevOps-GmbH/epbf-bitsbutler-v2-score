@@ -28,6 +28,6 @@
 export default defineEventHandler(async (event) => {
   const id = parseId(getRouterParam(event, 'id'), 'Partiekennung')
 
-  return await anDieVerwaltung<{ acknowledgedAt: string }>(
+  return await toAdmin<{ acknowledgedAt: string }>(
     event, `/matches/${id}/shot-clock/acknowledge`, { method: 'POST' })
 })

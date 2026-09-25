@@ -6,7 +6,7 @@
  * eigene Registrierung liefe auf jeder Seite dieser Anwendung, und obwohl
  * das heute jede Seite unter `/board` wäre, soll das im Code selbst
  * geprüft werden und nicht aus einem Zufall der Ordnerstruktur folgen —
- * dieselbe Haltung wie `istTafel` in app.vue, das trotz "hier ist ohnehin
+ * dieselbe Haltung wie `isBoard` in app.vue, das trotz "hier ist ohnehin
  * alles Tafel" ausdrücklich prüft statt anzunehmen.
  *
  * `scope: '/board'` UND NICHT DER GRUNDPFAD DER DATEI: eine unter `/sw.js`
@@ -28,10 +28,10 @@
 export default defineNuxtPlugin(() => {
   if (!('serviceWorker' in navigator)) return
 
-  const istTafel = location.pathname === '/board' || location.pathname.startsWith('/board/')
-  if (!istTafel) return
+  const isBoard = location.pathname === '/board' || location.pathname.startsWith('/board/')
+  if (!isBoard) return
 
-  const registrieren = () => {
+  const register = () => {
     navigator.serviceWorker.register('/sw.js', { scope: '/board' }).catch(() => {
       /*
        * Ein gescheitertes Registrieren (privater Modus, ein Browser ohne
@@ -42,6 +42,6 @@ export default defineNuxtPlugin(() => {
     })
   }
 
-  if (document.readyState === 'complete') registrieren()
-  else window.addEventListener('load', registrieren, { once: true })
+  if (document.readyState === 'complete') register()
+  else window.addEventListener('load', register, { once: true })
 })

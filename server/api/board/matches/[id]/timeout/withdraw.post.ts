@@ -35,8 +35,8 @@ export default defineEventHandler(async (event) => {
   const id = parseId(getRouterParam(event, 'id'), 'Partiekennung')
   const body = await readBody<{ side?: string, boardPin?: string }>(event)
 
-  const seite = String(body?.side ?? '').trim().toUpperCase()
-  if (seite !== 'A' && seite !== 'B') {
+  const side = String(body?.side ?? '').trim().toUpperCase()
+  if (side !== 'A' && side !== 'B') {
     throw createError({ statusCode: 400, statusMessage: 'Keine Seite' })
   }
 
@@ -58,7 +58,7 @@ export default defineEventHandler(async (event) => {
    * braucht keinen Code — der Server sieht am Keks, ob ein Mensch handelt,
    * und ein leeres Feld im Rumpf sähe aus wie ein Versuch, der schiefging.
    */
-  return await anDieVerwaltung(event, `/matches/${id}/timeout/withdraw?side=${seite}`, {
+  return await toAdmin(event, `/matches/${id}/timeout/withdraw?side=${side}`, {
     method: 'POST',
     body: code === '' ? {} : { boardPin: code },
   })

@@ -40,6 +40,6 @@ export default defineEventHandler(async (event) => {
     })
   }
 
-  return await anDieVerwaltung<{ name: string }>(
+  return await toAdmin<{ name: string }>(
     event, '/board/grant/pin', { method: 'POST', body: { pin: code } })
 })

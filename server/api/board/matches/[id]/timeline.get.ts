@@ -9,7 +9,7 @@ import type { MatchEventPublic } from '~~/shared/types/api'
  * `/api/matches/{id}/timeline`, also über die ÖFFENTLICHE Leseschnittstelle.
  * Die filtert, was das Publikum nichts angeht: `PublicRepository.matchTimeline`
  * lässt `NOTE` und `UNDO` weg. Das Menü bekam damit nie zu sehen, was es am
- * dringendsten braucht — der `case 'NOTE'` in Schirimenue.vue
+ * dringendsten braucht — der `case 'NOTE'` in RefereeMenu.vue
  * ("Score corrected …") stand seit jeher da und konnte nie eintreten, weil
  * die Zeile schon in der Datenbankabfrage weggefallen war.
  *
@@ -53,7 +53,7 @@ import type { MatchEventPublic } from '~~/shared/types/api'
  *
  * WAS BEI FEHLENDER ANMELDUNG PASSIERT
  *
- * `vonDerVerwaltung` gibt dann `null`, und daraus wird hier eine leere Liste
+ * `fromAdmin` gibt dann `null`, und daraus wird hier eine leere Liste
  * statt eines Fehlers. Ein Bildschirm ohne Freigabe und ohne Anmeldung
  * kommt gar nicht bis hierher (das Menü hängt an `zaehlen`), und eine rote
  * Zeile für einen Fall, den es nicht gibt, wäre am Tisch nur Lärm.
@@ -67,19 +67,19 @@ import type { MatchEventPublic } from '~~/shared/types/api'
  * stehen; das ist der harmlose Fehler von beiden, denn ein Name zu viel ist
  * am Tisch besser als ein fehlender.
  */
-function nurDerName(etikett: string | null): string | null {
-  const ganz = String(etikett ?? '').trim()
-  if (ganz === '') return null
-  const erstes = ganz.split(' · ')[0]?.trim() ?? ''
-  return erstes === '' ? null : erstes
+function nameOnly(label: string | null): string | null {
+  const full = String(label ?? '').trim()
+  if (full === '') return null
+  const first = full.split(' · ')[0]?.trim() ?? ''
+  return first === '' ? null : first
 }
 export default defineEventHandler(async (event): Promise<MatchEventPublic[]> => {
-  const roh = String(getRouterParam(event, 'id') ?? '')
-  if (!/^[0-9a-f-]{36}$/i.test(roh)) {
+  const raw = String(getRouterParam(event, 'id') ?? '')
+  if (!/^[0-9a-f-]{36}$/i.test(raw)) {
     throw createError({ statusCode: 400, statusMessage: 'Keine Partiekennung' })
   }
 
-  const zeilen = await vonDerVerwaltung<Array<{
+  const rows = await fromAdmin<Array<{
     at: string
     kind: string
     side: 'A' | 'B' | null
@@ -88,9 +88,9 @@ export default defineEventHandler(async (event): Promise<MatchEventPublic[]> => 
     detail: Record<string, string | number> | null
     actor_label: string | null
     actor_via: 'SESSION' | 'BOARD' | 'BOARD_PIN' | null
-  }>>(event, `/matches/${roh}/timeline`)
+  }>>(event, `/matches/${raw}/timeline`)
 
-  return (zeilen ?? []).map(z => ({
+  return (rows ?? []).map(z => ({
     /*
      * Auf die Form gebracht, die `new Date` sicher versteht. Die Verwaltung
      * schreibt Zeitstempel im PostgreSQL-Stil ("…T21:46:00+02"), und für den
@@ -118,7 +118,7 @@ export default defineEventHandler(async (event): Promise<MatchEventPublic[]> => 
      * anzeigen.
      */
     actorName: z.actor_via === 'BOARD_PIN' || z.actor_via === 'SESSION'
-      ? nurDerName(z.actor_label)
+      ? nameOnly(z.actor_label)
       : null,
   }))
 })

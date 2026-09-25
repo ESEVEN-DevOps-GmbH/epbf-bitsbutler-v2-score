@@ -46,18 +46,18 @@ import type { H3Event } from 'h3'
  * (`{error, detail, params}`) durch. Nur ein fehlender Keks wird hier
  * beantwortet und nicht erst dort: ohne Anmeldung gibt es nichts zu fragen.
  */
-export async function anDieVerwaltung<T>(
+export async function toAdmin<T>(
   event: H3Event,
-  pfad: string,
+  path: string,
   // DELETE steht seit der Selbstverwaltung des Profils mit dabei (einen
   // Sponsor entfernen, einen Antrag zuruecknehmen). Es ist ein
   // Schreibvorgang wie die beiden anderen und gehoert deshalb hierher und
-  // nicht zu `vonDerVerwaltung` -- der Unterschied, den diese Trennung
+  // nicht zu `fromAdmin` -- der Unterschied, den diese Trennung
   // sichtbar macht, ist "aendert etwas" und nicht "schickt einen Rumpf".
-  optionen: { method: 'POST' | 'PUT' | 'DELETE', body?: unknown } = { method: 'POST' },
+  options: { method: 'POST' | 'PUT' | 'DELETE', body?: unknown } = { method: 'POST' },
 ): Promise<T> {
-  const kekse = weiterzureichendeKekse(event)
-  if (!kekse) {
+  const cookies = forwardedCookies(event)
+  if (!cookies) {
     throw createError({
       statusCode: 401,
       statusMessage: 'Not signed in',
@@ -65,8 +65,8 @@ export async function anDieVerwaltung<T>(
     })
   }
 
-  const basis = String(process.env.BB_API ?? '')
-  if (!basis) {
+  const base = String(process.env.BB_API ?? '')
+  if (!base) {
     throw createError({ statusCode: 503, statusMessage: 'Scoring not reachable' })
   }
 
@@ -81,15 +81,15 @@ export async function anDieVerwaltung<T>(
    * nichts angekommen. Genau dieser Unterschied entscheidet, ob er noch
    * einmal tippt oder jemanden holt.
    */
-  const antwort = await $fetch.raw<T>(`${basis}/api/admin/v1${pfad}`, {
-    method: optionen.method,
-    body: optionen.body as Record<string, unknown> | undefined,
+  const response = await $fetch.raw<T>(`${base}/api/admin/v1${path}`, {
+    method: options.method,
+    body: options.body as Record<string, unknown> | undefined,
     headers: {
-      cookie: kekse,
+      cookie: cookies,
       // Wer geschrieben hat, steht in audit und in identity.login_attempt.
       // Ohne diesen Kopf stünde dort die Adresse dieses Servers — siehe
-      // server/utils/herkunft.ts.
-      ...(herkunftskette(event) ? { 'x-forwarded-for': herkunftskette(event)! } : {}),
+      // server/utils/origin.ts.
+      ...(originChain(event) ? { 'x-forwarded-for': originChain(event)! } : {}),
       // Und womit. Ohne ihn stünde in identity.board_grant.user_agent die
       // Kennung dieses Servers, und die Turnierleitung suchte in der Maske
       // einen Schirm, der überall gleich heisst.
@@ -117,37 +117,37 @@ export async function anDieVerwaltung<T>(
     })
   })
 
-  if (antwort.status >= 400) {
+  if (response.status >= 400) {
     throw createError({
-      statusCode: antwort.status,
+      statusCode: response.status,
       statusMessage: 'Rejected',
-      data: antwort._data,
+      data: response._data,
     })
   }
 
-  return antwort._data as T
+  return response._data as T
 }
 
 /**
  * Eine Lesefrage an die Verwaltung — dieselbe Durchreiche, nur ohne Wirkung.
  *
- * Getrennt von {@link anDieVerwaltung}, damit an der Aufrufstelle zu sehen
+ * Getrennt von {@link toAdmin}, damit an der Aufrufstelle zu sehen
  * ist, ob etwas geschrieben wird. Eine Funktion mit einem Merkmal `method`
  * verwischt genau den Unterschied, auf den es hier ankommt.
  */
-export async function vonDerVerwaltung<T>(event: H3Event, pfad: string): Promise<T | null> {
-  const kekse = weiterzureichendeKekse(event)
-  const basis = String(process.env.BB_API ?? '')
-  if (!kekse || !basis) return null
+export async function fromAdmin<T>(event: H3Event, path: string): Promise<T | null> {
+  const cookies = forwardedCookies(event)
+  const base = String(process.env.BB_API ?? '')
+  if (!cookies || !base) return null
 
-  const antwort = await $fetch<T>(`${basis}/api/admin/v1${pfad}`, {
-    headers: { cookie: kekse },
+  const response = await $fetch<T>(`${base}/api/admin/v1${path}`, {
+    headers: { cookie: cookies },
     timeout: 10_000,
   }).catch(() => null)
   // Die Zusicherung ist hier und nicht beim Aufrufer: `$fetch` verspricht
   // ohne Schema alles Mögliche zurück, und die Form, die wirklich kommt,
   // kennt der Endpunkt, der sie anfordert.
-  return (antwort ?? null) as T | null
+  return (response ?? null) as T | null
 }
 
 /**
@@ -160,21 +160,21 @@ export async function vonDerVerwaltung<T>(event: H3Event, pfad: string): Promise
  * sich merken müsste, dass es inzwischen zwei sind — und der nächste neue
  * merkt es sich nicht.
  */
-export function weiterzureichendeKekse(event: H3Event): string | null {
-  const teile: string[] = []
-  const sitzung = getCookie(event, 'bb_session')
-  const tafel = getCookie(event, 'bb_board')
-  if (sitzung) teile.push(`bb_session=${sitzung}`)
-  if (tafel) teile.push(`bb_board=${tafel}`)
-  return teile.length > 0 ? teile.join('; ') : null
+export function forwardedCookies(event: H3Event): string | null {
+  const parts: string[] = []
+  const session = getCookie(event, 'bb_session')
+  const board = getCookie(event, 'bb_board')
+  if (session) parts.push(`bb_session=${session}`)
+  if (board) parts.push(`bb_board=${board}`)
+  return parts.length > 0 ? parts.join('; ') : null
 }
 
 /** Hält dieses Gerät eine Freigabe? Für Endpunkte, die die Fälle trennen. */
-export function haeltFreigabe(event: H3Event): boolean {
+export function hasGrant(event: H3Event): boolean {
   return !!getCookie(event, 'bb_board')
 }
 
 /** Ist jemand angemeldet? Der Mensch gewinnt, und manchmal muss man das wissen. */
-export function istAngemeldet(event: H3Event): boolean {
+export function isSignedIn(event: H3Event): boolean {
   return !!getCookie(event, 'bb_session')
 }

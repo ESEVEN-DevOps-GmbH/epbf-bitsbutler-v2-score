@@ -33,7 +33,7 @@ export default defineEventHandler(async (event) => {
     throw createError({ statusCode: 400, statusMessage: 'Kein Zustand' })
   }
 
-  return await anDieVerwaltung<{ running: boolean }>(
+  return await toAdmin<{ running: boolean }>(
     event, `/matches/${id}/time-limit/running`, {
       method: 'PUT',
       body: { running: body.running },

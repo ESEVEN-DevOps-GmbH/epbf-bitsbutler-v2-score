@@ -58,7 +58,7 @@ import type { Ref } from 'vue'
  *
  * Der Fall: das Gerät bekommt eine neue Kennung gemeldet, lädt neu — und
  * bekommt dasselbe alte Dokument zurück. Auf iOS ist das kein erfundenes
- * Beispiel (siehe `nachladen`). Ohne Sperre meldete der nächste Abruf zehn
+ * Beispiel (siehe `reload`). Ohne Sperre meldete der nächste Abruf zehn
  * Sekunden später wieder eine andere Kennung, und die Tafel lüde in einer
  * Schleife neu, für immer, vor Publikum.
  *
@@ -86,25 +86,25 @@ import type { Ref } from 'vue'
  * neu startet, holt das Dokument ohnehin frisch, und dann soll ihn kein
  * Merker von gestern bremsen.
  */
-const SPERR_SCHLUESSEL = 'bb.board.fassung'
+const LOCK_STORAGE_KEY = 'bb.board.fassung'
 
 /** Der Name des Parameters, der die Zielkennung in der Adresse trägt. */
-const FASSUNGSPARAMETER = 'v'
+const VERSION_PARAM = 'v'
 
-interface Sperrmerker {
+interface LockRecord {
   /** Die Kennung, für die geladen wurde. */
-  ziel: string
+  target: string
   /** Wann. Nur für den Menschen, der das im Speicher des Geräts nachsieht. */
-  zeit: number
+  time: number
 }
 
-function merkerLesen(): Sperrmerker | null {
+function storeRead(): LockRecord | null {
   try {
-    const roh = window.sessionStorage.getItem(SPERR_SCHLUESSEL)
-    if (!roh) return null
-    const m = JSON.parse(roh) as Partial<Sperrmerker>
-    if (typeof m.ziel !== 'string') return null
-    return { ziel: m.ziel, zeit: Number(m.zeit) || 0 }
+    const raw = window.sessionStorage.getItem(LOCK_STORAGE_KEY)
+    if (!raw) return null
+    const m = JSON.parse(raw) as Partial<LockRecord>
+    if (typeof m.target !== 'string') return null
+    return { target: m.target, time: Number(m.time) || 0 }
   }
   catch {
     // Kein Speicher, kein Merker — dann trägt der Parameter in der Adresse
@@ -113,42 +113,42 @@ function merkerLesen(): Sperrmerker | null {
   }
 }
 
-function merkerSchreiben(m: Sperrmerker) {
+function storeWrite(m: LockRecord) {
   try {
-    window.sessionStorage.setItem(SPERR_SCHLUESSEL, JSON.stringify(m))
+    window.sessionStorage.setItem(LOCK_STORAGE_KEY, JSON.stringify(m))
   }
   catch { /* siehe oben */ }
 }
 
-function merkerVergessen() {
+function storeForget() {
   try {
-    window.sessionStorage.removeItem(SPERR_SCHLUESSEL)
+    window.sessionStorage.removeItem(LOCK_STORAGE_KEY)
   }
   catch { /* siehe oben */ }
 }
 
 /** Trägt die Adresse dieses Dokuments schon die Zielkennung? */
-function adresseTraegt(ziel: string): boolean {
+function addressCarries(target: string): boolean {
   try {
-    return new URLSearchParams(window.location.search).get(FASSUNGSPARAMETER) === ziel
+    return new URLSearchParams(window.location.search).get(VERSION_PARAM) === target
   }
   catch {
     return false
   }
 }
 
-export interface Fassungswechsel {
-  /** Die Kennung des Baus, der gerade läuft — gekürzt siehe `kurz`. */
-  laufendeKennung: string
+export interface VersionSwitch {
+  /** Die Kennung des Baus, der gerade läuft — gekürzt siehe `short`. */
+  currentBuildId: string
   /** Die ersten acht Stellen. Das ist, was am Telefon vorgelesen wird. */
-  kurz: string
+  short: string
   /** Eine andere Kennung ist gemeldet und die Tafel wartet auf den Moment. */
-  wartet: Ref<boolean>
+  pending: Ref<boolean>
   /** Was ein Abruf an Kennung mitgebracht hat. Gleich oder leer: nichts tun. */
-  melden: (kennung: string | null | undefined) => void
+  report: (buildId: string | null | undefined) => void
 }
 
-export interface FassungOptionen {
+export interface VersionSwitchOptions {
   /**
    * Ob JETZT geladen werden darf.
    *
@@ -157,11 +157,11 @@ export interface FassungOptionen {
    * geprüft wird: eine Partie, die auf FINISHED springt, soll nicht bis zum
    * nächsten Abruf warten müssen, und ein Menü, das zugeht, auch nicht.
    */
-  darf: Ref<boolean> | (() => boolean)
+  allowed: Ref<boolean> | (() => boolean)
   /**
    * SELBST NACHFRAGEN — nur für Seiten, die keinen Träger haben.
    *
-   * Der Regelfall ist `melden()`: die Kennung fährt in einer Antwort mit,
+   * Der Regelfall ist `report()`: die Kennung fährt in einer Antwort mit,
    * die die Seite ohnehin holt, und kostet nichts. Genau eine Tafelseite hat
    * keine solche Antwort — die Tischwahl (/board/<eventId>) fragt EINMAL und
    * dann nie wieder. Sie bekommt deshalb eine eigene, langsame Frage nach
@@ -175,12 +175,12 @@ export interface FassungOptionen {
    *
    * Weglassen heisst: es wird nur gemeldet, was ankommt.
    */
-  selbstFragenMs?: number
+  selfPollMs?: number
 }
 
-export function useFassungswechsel(optionen: FassungOptionen): Fassungswechsel {
-  const laufendeKennung = String(useRuntimeConfig().app.buildId ?? '')
-  const gemeldet = ref<string | null>(null)
+export function useVersionSwitch(options: VersionSwitchOptions): VersionSwitch {
+  const currentBuildId = String(useRuntimeConfig().app.buildId ?? '')
+  const reported = ref<string | null>(null)
 
   /**
    * Schon ausgelöst — für die Spanne zwischen `location.replace` und dem
@@ -191,9 +191,9 @@ export function useFassungswechsel(optionen: FassungOptionen): Fassungswechsel {
    * auslösen. Das wäre kein Schaden, aber eine zweite Navigation, die man
    * im Protokoll des Geräts sucht.
    */
-  let ausgeloest = false
+  let triggered = false
 
-  const darfJetzt = () => (typeof optionen.darf === 'function' ? optionen.darf() : optionen.darf.value)
+  const isAllowedNow = () => (typeof options.allowed === 'function' ? options.allowed() : options.allowed.value)
 
   /**
    * NEU LADEN — MIT DER KENNUNG IN DER ADRESSE.
@@ -224,32 +224,32 @@ export function useFassungswechsel(optionen: FassungOptionen): Fassungswechsel {
    * er ist am Gerät der einzige Beleg dafür, dass wirklich neu geladen wurde
    * und nicht nur neu gezeichnet.
    */
-  function nachladen(ziel: string) {
-    if (ausgeloest) return
+  function reload(target: string) {
+    if (triggered) return
 
     // Die beiden Riegel — siehe SPERRE GEGEN SCHLEIFEN ganz oben.
-    if (adresseTraegt(ziel)) return
-    const merker = merkerLesen()
-    if (merker && merker.ziel === ziel) return
+    if (addressCarries(target)) return
+    const record = storeRead()
+    if (record && record.target === target) return
 
-    ausgeloest = true
-    merkerSchreiben({ ziel, zeit: Date.now() })
+    triggered = true
+    storeWrite({ target, time: Date.now() })
 
     // Aus `pathname` und nicht aus `href`: sonst sammelten sich bei jedem
     // Wechsel die Parameter der vorigen Male an.
-    const adresse = `${window.location.pathname}?${FASSUNGSPARAMETER}=${encodeURIComponent(ziel)}`
-    window.location.replace(adresse)
+    const address = `${window.location.pathname}?${VERSION_PARAM}=${encodeURIComponent(target)}`
+    window.location.replace(address)
   }
 
-  function melden(kennung: string | null | undefined) {
-    if (!kennung || !laufendeKennung || kennung === laufendeKennung) {
-      gemeldet.value = null
+  function report(buildId: string | null | undefined) {
+    if (!buildId || !currentBuildId || buildId === currentBuildId) {
+      reported.value = null
       return
     }
-    gemeldet.value = kennung
+    reported.value = buildId
   }
 
-  const wartet = computed(() => gemeldet.value !== null)
+  const pending = computed(() => reported.value !== null)
 
   /**
    * Wo `latest.json` liegt — gerechnet und nicht geraten.
@@ -261,11 +261,11 @@ export function useFassungswechsel(optionen: FassungOptionen): Fassungswechsel {
    * zwar ohne Fehlermeldung: die Abfrage liefe ins Leere, und die Tischwahl
    * merkte nie wieder etwas.
    */
-  function kennungsadresse(): string {
+  function buildManifestUrl(): string {
     const app = useRuntimeConfig().app
-    const wurzel = String(app.cdnURL || app.baseURL || '/')
-    const buendel = String(app.buildAssetsDir || '/_nuxt/')
-    return `${wurzel.replace(/\/$/, '')}/${buendel.replace(/^\/+|\/+$/g, '')}/builds/latest.json`
+    const root = String(app.cdnURL || app.baseURL || '/')
+    const bundleDir = String(app.buildAssetsDir || '/_nuxt/')
+    return `${root.replace(/\/$/, '')}/${bundleDir.replace(/^\/+|\/+$/g, '')}/builds/latest.json`
   }
 
   if (import.meta.client) {
@@ -276,8 +276,8 @@ export function useFassungswechsel(optionen: FassungOptionen): Fassungswechsel {
        * wird weggeräumt. Was stehen bleibt, ist der Merker eines Versuchs,
        * der NICHT getragen hat; genau der soll den zweiten verhindern.
        */
-      const merker = merkerLesen()
-      if (merker && merker.ziel === laufendeKennung) merkerVergessen()
+      const record = storeRead()
+      if (record && record.target === currentBuildId) storeForget()
     })
 
     /*
@@ -287,41 +287,41 @@ export function useFassungswechsel(optionen: FassungOptionen): Fassungswechsel {
      * vorbei ist" und „lädt beim übernächsten Abruf".
      */
     watch(
-      [gemeldet, () => darfJetzt()],
-      ([ziel, darf]) => {
-        if (!ziel || !darf) return
-        nachladen(ziel)
+      [reported, () => isAllowedNow()],
+      ([target, allowed]) => {
+        if (!target || !allowed) return
+        reload(target)
       },
       { immediate: true },
     )
 
-    if (optionen.selbstFragenMs) {
-      let uhr: ReturnType<typeof setInterval> | null = null
+    if (options.selfPollMs) {
+      let timer: ReturnType<typeof setInterval> | null = null
       onMounted(() => {
-        uhr = setInterval(async () => {
+        timer = setInterval(async () => {
           try {
             // Der Zeitstempel im Abfrageteil ist Nuxts eigener Kniff: die
             // Datei liegt unter `/_nuxt/**` und wird von jedem Vorschaltcache
             // für ein Jahr aufgehoben. Ohne ihn läse man die Kennung von
             // vorgestern.
-            const meta = await $fetch<{ id?: string }>(`${kennungsadresse()}?${Date.now()}`)
-            melden(meta?.id)
+            const meta = await $fetch<{ id?: string }>(`${buildManifestUrl()}?${Date.now()}`)
+            report(meta?.id)
           }
           catch {
             // Ein Aussetzer ist kein Ereignis. Die nächste Minute fragt neu.
           }
-        }, optionen.selbstFragenMs)
+        }, options.selfPollMs)
       })
       onBeforeUnmount(() => {
-        if (uhr) clearInterval(uhr)
+        if (timer) clearInterval(timer)
       })
     }
   }
 
   return {
-    laufendeKennung,
-    kurz: laufendeKennung.slice(0, 8),
-    wartet,
-    melden,
+    currentBuildId,
+    short: currentBuildId.slice(0, 8),
+    pending,
+    report,
   }
 }

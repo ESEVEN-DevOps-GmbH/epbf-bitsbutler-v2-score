@@ -17,15 +17,15 @@ import { NetworkOnly } from 'workbox-strategies'
  * Service Worker gesehen, siehe ganz unten.
  *
  * ===========================================================================
- * DAS ZUSAMMENSPIEL MIT useFassungswechsel — DIE EIGENTLICHE ARBEIT HIER
+ * DAS ZUSAMMENSPIEL MIT useVersionSwitch — DIE EIGENTLICHE ARBEIT HIER
  * ===========================================================================
  *
- * useFassungswechsel.ts trifft eine ausdrückliche Entscheidung des
+ * useVersionSwitch.ts trifft eine ausdrückliche Entscheidung des
  * Auftraggebers: "wenn keine partie läuft, aktualisieren.. fertig". Ein
  * Service Worker kann das auf zwei Arten kaputt machen:
  *
  *   1. Indem er eine ALTE, zwischengespeicherte Antwort auf eine Navigation
- *      ausliefert, OBWOHL Netz da wäre — dann sieht useFassungswechsel nie
+ *      ausliefert, OBWOHL Netz da wäre — dann sieht useVersionSwitch nie
  *      eine neue Bau-Kennung, weil die Antwort, aus der sie kommt (siehe
  *      `server/api/board/[eventId]/tables/[number].get.ts`), nie wirklich
  *      beim Server war.
@@ -36,14 +36,14 @@ import { NetworkOnly } from 'workbox-strategies'
  * DIE LÖSUNG FÜR (1): JEDE Navigation unter `/board/**` läuft NUR über das
  * Netz (`NetworkOnly`, siehe unten) — nie `NetworkFirst`, nie
  * `StaleWhileRevalidate`. Ist Netz da, kommt IMMER die Antwort des Servers
- * an, mit der WIRKLICH aktuellen Bau-Kennung; useFassungswechsel bekommt sie
+ * an, mit der WIRKLICH aktuellen Bau-Kennung; useVersionSwitch bekommt sie
  * genau wie ohne Service Worker auch. Der einzige Fall, in dem dieser
  * Service Worker überhaupt etwas ausliefert, das nicht vom Server kam, ist
- * ein Netzfehler — und dann kann useFassungswechsel ohnehin nichts prüfen,
+ * ein Netzfehler — und dann kann useVersionSwitch ohnehin nichts prüfen,
  * weil auch OHNE Service Worker keine Antwort käme.
  *
  * Damit erledigt sich die geforderte Entscheidung "wie merkt der Service
- * Worker eine neue Fassung, ohne dass useFassungswechsel es zweimal tut"
+ * Worker eine neue Fassung, ohne dass useVersionSwitch es zweimal tut"
  * von selbst: DIESER Service Worker merkt gar nichts über Fassungen. Er
  * greift nie in eine Navigation ein, die das Netz beantworten kann, und für
  * jede, die es nicht kann, gibt es sowieso nichts zu vergleichen. Eine
@@ -57,17 +57,17 @@ import { NetworkOnly } from 'workbox-strategies'
  * Bau, also erkennt der Browser sie als neue Fassung). Ohne `skipWaiting()`
  * bleibt sie im Zustand "waiting", bis KEIN Fenster mehr von der ALTEN
  * Fassung kontrolliert wird — und genau das ist hier fast immer erst der
- * Fall, wenn useFassungswechsel selbst neu lädt (oder das Gerät abends
+ * Fall, wenn useVersionSwitch selbst neu lädt (oder das Gerät abends
  * ausgeschaltet wird). Das ist KEIN Nebeneffekt, den man in Kauf nimmt,
  * sondern GENAU der geforderte Rückhalt: die neue Fassung wartet auf denselben
- * Moment wie useFassungswechsel, ohne dass eine einzige Zeile beide
+ * Moment wie useVersionSwitch, ohne dass eine einzige Zeile beide
  * verbindet — der Browser selbst hält die Reihenfolge ein.
  *
  * Ein erzwungenes `skipWaiting()` hätte einen echten Preis gehabt: Es hätte
  * `cleanupOutdatedCaches()` sofort ausgelöst und damit die Dateien der
  * ALTEN Fassung aus dem Zwischenspeicher entfernt — WÄHREND eine Tafel mit
  * genau dieser alten Fassung noch im Speicher des Geräts läuft und offline
- * gehen könnte. Bricht das Netz dann ab, bevor useFassungswechsel überhaupt
+ * gehen könnte. Bricht das Netz dann ab, bevor useVersionSwitch überhaupt
  * geladen hätte, fände ein Nachladen eines noch nicht besuchten
  * Seitenteils (z. B. ein Wechsel zurück zur Tischwahl über das
  * Schiedsrichtermenü) weder die Datei auf dem Server (der hat nur noch die
@@ -77,7 +77,7 @@ import { NetworkOnly } from 'workbox-strategies'
  *
  * Der Preis dieser Zurückhaltung: das GERÜST für den Offline-Rückfall
  * (`/board`, siehe unten) wird erst mit dem NÄCHSTEN natürlichen Wechsel auf
- * den neusten Stand gebracht — nach dem Neuladen, das useFassungswechsel
+ * den neusten Stand gebracht — nach dem Neuladen, das useVersionSwitch
  * ohnehin auslöst, oder wenn ein Gerät morgens ganz neu startet. Das ist
  * hinnehmbar: der Offline-Rückfall wird nur gebraucht, wenn gerade KEIN Netz
  * da ist, und in dem Moment kann ohnehin nichts aktualisiert werden.
@@ -149,8 +149,8 @@ registerRoute(
  */
 setCatchHandler(async ({ request }) => {
   if (request.mode === 'navigate') {
-    const rueckfall = await matchPrecache('/board')
-    if (rueckfall) return rueckfall
+    const fallback = await matchPrecache('/board')
+    if (fallback) return fallback
   }
   return Response.error()
 })
@@ -158,8 +158,8 @@ setCatchHandler(async ({ request }) => {
 /**
  * `/_nuxt/builds/**` — NIE AUS DEM SPEICHER.
  *
- * Diese Dateien tragen die Bau-Kennung, an der `useFassungswechsel.ts` (dort
- * `kennungsadresse`) eine neue Fassung erkennt. Ein Zwischenspeicher hier
+ * Diese Dateien tragen die Bau-Kennung, an der `useVersionSwitch.ts` (dort
+ * `buildManifestUrl`) eine neue Fassung erkennt. Ein Zwischenspeicher hier
  * hätte denselben Effekt wie eine zwischengespeicherte Navigation: das Gerät
  * sähe nie wieder eine neue Kennung. `globPatterns` oben nimmt schon keine
  * `.json`-Dateien auf, diese Zeile ist die zweite, unabhängige Sicherung —

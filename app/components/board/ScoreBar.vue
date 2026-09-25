@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Match } from '~~/shared/types/api'
-import type { Foulgriff, Lage, Seite, Standpaar, Zaehlfehler, Zusatz } from '~/composables/useZaehlwerk'
+import type { FoulKind, TableState, Side, ScorePair, ScoringError, Extra } from '~/composables/useScoring'
 
 /**
  * DIE ZÄHLLEISTE — die Tafel wird zum Zählgerät.
@@ -38,7 +38,7 @@ import type { Foulgriff, Lage, Seite, Standpaar, Zaehlfehler, Zusatz } from '~/c
  * eine Tafel.
  */
 const props = defineProps<{
-  partie: Match
+  match: Match
   /**
    * WELCHE FASSUNG DER LEISTE — drei und nicht mehr zwei.
    *
@@ -53,18 +53,18 @@ const props = defineProps<{
    * Racks und keine Foulfolge; ihm dieselben Flächen hinzustellen wäre für
    * eine der beiden Disziplinen falsch.
    */
-  modus: 'RACK_RACE' | 'POINT_RACE' | 'STRAIGHT_POOL'
-  stand: Standpaar
+  mode: 'RACK_RACE' | 'POINT_RACE' | 'STRAIGHT_POOL'
+  score: ScorePair
   /**
    * Restkugeln und Foulzähler — nur bei STRAIGHT_POOL von Bedeutung.
    *
    * Sie kommt als Ganzes und nicht als zwei Werte: am Tisch wird sie als EIN
    * Zustand gelesen ("acht liegen noch, und er steht auf zwei Fouls").
    */
-  lage: Lage
+  ballsOnTable: TableState
   /** Wer am Tisch ist. Null heisst: der Anstoss steht noch aus. */
-  amTisch: Seite | null
-  zusatz: Zusatz | null
+  atTable: Side | null
+  extra: Extra | null
   /**
    * Wessen Auszeit gerade läuft — je Seite, weil BEIDE laufen können.
    *
@@ -73,17 +73,17 @@ const props = defineProps<{
    * hinaus, beide nehmen ihre Auszeit. Die Taste 4 beendet dann nur die des
    * linken Spielers und lässt die des rechten laufen.
    */
-  auszeitLaeuft: { A: boolean, B: boolean }
+  timeoutRunning: { A: boolean, B: boolean }
   /**
    * Wer die Distanz erreicht hat — null, solange niemand. Die Regel steht
    * auf der Tafel und nicht hier, weil die Tastatur des Vorgängersystems
    * (Taste 5) dieselbe Antwort braucht und zwei Rechnungen auseinanderlaufen.
    */
-  sieger: Seite | null
+  winner: Side | null
   /**
-   * DIE DISTANZ IST ERREICHT — UND DAS IST NICHT DASSELBE WIE `sieger`.
+   * DIE DISTANZ IST ERREICHT — UND DAS IST NICHT DASSELBE WIE `winner`.
    *
-   * `sieger` beantwortet „wer hat gewonnen" und verlangt dafür einen
+   * `winner` beantwortet „wer hat gewonnen" und verlangt dafür einen
    * VORSPRUNG; diese Angabe beantwortet „ist die Partie durch" und fragt nur
    * gegen die Distanz. Die beiden fallen in genau einem Fall auseinander,
    * und der ist der Grund für die zweite Angabe: stehen BEIDE auf der
@@ -93,37 +93,37 @@ const props = defineProps<{
    * genau dieser Lage weiterzählen.
    *
    * Sie kommt von der Tafel und wird hier nicht gerechnet, aus demselben
-   * Grund wie `sieger`: die Taste 5 der Fernbedienung braucht dieselbe
+   * Grund wie `winner`: die Taste 5 der Fernbedienung braucht dieselbe
    * Antwort, und zwei Rechnungen für dieselbe Frage laufen auseinander.
    */
-  distanzErreicht: boolean
+  raceReached: boolean
   /** Welche Seite der Partie links auf dem Schirm steht — siehe Spiegel. */
-  links: Seite
-  rechts: Seite
-  laeuft: boolean
-  fehler: Zaehlfehler | null
-  kannZurueck: boolean
+  left: Side
+  right: Side
+  busy: boolean
+  error: ScoringError | null
+  canUndo: boolean
 }>()
 
 const emit = defineEmits<{
-  zaehlen: [seite: Seite, schritt: number]
-  setzen: [stand: Standpaar]
-  zurueck: []
-  anstoss: [seite: Seite]
-  auszeit: [seite: Seite, laeuftGerade: boolean]
-  beenden: []
+  count: [side: Side, step: number]
+  set: [score: ScorePair]
+  undo: []
+  break: [side: Side]
+  timeout: [side: Side, running: boolean]
+  finish: []
   /* 14.1 endlos — die fünf Vorgänge am Tisch. Sie tragen KEINE Seite: sie
      gehen immer den an, der gerade am Tisch ist, und den kennt das Zählwerk
      besser als diese Leiste. */
-  rest: [uebrig: number]
-  rack: [auchDieFuenfzehnte: boolean]
+  remaining: [remaining: number]
+  rack: [alsoFifteenth: boolean]
   safety: []
-  foul: [griff: Foulgriff]
-  tisch: []
+  foul: [kind: FoulKind]
+  table: []
 }>()
 
-function seiteDaten(seite: Seite) {
-  return seite === 'A' ? props.partie.sideA : props.partie.sideB
+function sideData(side: Side) {
+  return side === 'A' ? props.match.sideA : props.match.sideB
 }
 
 /**
@@ -134,14 +134,14 @@ function seiteDaten(seite: Seite) {
  * in eine Knopfbreite passt. "Hjalmarström breaks" ist am Tisch eindeutig;
  * "Linnéa Hjalmarström breaks" passt nicht und sagt nichts mehr.
  */
-function kurzname(seite: Seite): string {
-  const ganz = seiteDaten(seite).displayName.trim()
-  const teile = ganz.split(/\s+/)
-  return teile[teile.length - 1] ?? ganz
+function shortName(side: Side): string {
+  const full = sideData(side).displayName.trim()
+  const parts = full.split(/\s+/)
+  return parts[parts.length - 1] ?? full
 }
 
 /** Die Distanz: was zum Sieg fehlt. 0 heisst „steht nicht fest". */
-const distanz = computed(() => props.zusatz?.raceTo ?? props.partie.raceTo ?? 0)
+const distance = computed(() => props.extra?.raceTo ?? props.match.raceTo ?? 0)
 
 /**
  * Der Anstoß ist noch nicht entschieden — die erste Frage jeder Partie.
@@ -150,10 +150,10 @@ const distanz = computed(() => props.zusatz?.raceTo ?? props.partie.raceTo ?? 0)
  * BREAK_UNDECIDED ab. Die Leiste zeigt deshalb nichts anderes: ein Plus, das
  * garantiert scheitert, ist schlimmer als keines.
  */
-const anstossOffen = computed(() => !props.zusatz?.nextBreak)
+const breakOpen = computed(() => !props.extra?.nextBreak)
 
-const beendet = computed(() =>
-  props.partie.status === 'FINISHED' || props.partie.status === 'APPROVED')
+const finished = computed(() =>
+  props.match.status === 'FINISHED' || props.match.status === 'APPROVED')
 
 /* ------------------------------------------------------------------------
  * AB DER DISTANZ WIRD NICHT MEHR GEZAEHLT
@@ -186,7 +186,7 @@ const beendet = computed(() =>
  * DER EINWAND GEGEN DEN DECKEL WAR, ER RISSE STAND, RESTKUGELN UND AUFNAHME
  * AUSEINANDER. Er tut es nicht, weil er an der richtigen Stelle sitzt: die
  * drei werden aus DERSELBEN Differenz gerechnet (`restEintragen` und `rack`
- * in useZaehlwerk), und gedeckelt wird genau diese Differenz, bevor sie
+ * in useScoring), und gedeckelt wird genau diese Differenz, bevor sie
  * dreimal verwendet wird (`zubuchbar`). Der Stand steht auf 100, die
  * Aufnahme wächst um 3, der High run mit ihr. Nur die Restkugeln bleiben,
  * was der Schiedsrichter gesehen hat — acht liegen, also stehen acht da;
@@ -213,7 +213,7 @@ const beendet = computed(() =>
  *   am Turniertag schlimmer als der Befund.
  *
  *   DAS MINUS JE SEITE auf der Satztafel. Es IST eine Rücknahme und keine
- *   Korrektur — so steht es an `zaehlen` in useZaehlwerk, und am Tisch gibt
+ *   Korrektur — so steht es an `zaehlen` in useScoring, und am Tisch gibt
  *   es genau zwei Wege abwärts. Die Regel dieser Sperre lautet deshalb
  *   nicht „nichts geht mehr", sondern: was den Stand nur SENKEN kann,
  *   bleibt offen. Aufwärts ist Zählen, abwärts ist Berichtigen.
@@ -229,9 +229,9 @@ const beendet = computed(() =>
  * weil die Distanz durch einen Vertipper erreicht ist, nimmt ihn zurück;
  * damit fällt die Sperre in demselben Augenblick.
  *
- * VERWORFEN: nach `sieger` zu sperren. Stehen beide auf der Distanz, ist
- * `sieger` leer und die Tafel zählte ausgerechnet in der kaputtesten Lage
- * weiter. Gefragt wird deshalb `distanzErreicht` — siehe dort.
+ * VERWORFEN: nach `winner` zu sperren. Stehen beide auf der Distanz, ist
+ * `winner` leer und die Tafel zählte ausgerechnet in der kaputtesten Lage
+ * weiter. Gefragt wird deshalb `raceReached` — siehe dort.
  *
  * VERWORFEN: eine Rückfrage („wirklich weiterzählen?"). Sie machte aus
  * jedem Griff zwei und hinterliesse einen Zustand, den es im Spiel nicht
@@ -250,18 +250,18 @@ const beendet = computed(() =>
  * mit Recht, auch über die Distanz hinaus. Diese Leiste steht ohnehin nur
  * am Tisch.
  */
-const zaehlsperre = computed(() =>
-  props.distanzErreicht && !beendet.value
-    ? `Race to ${distanz.value} is reached — finish or undo`
+const scoreLockReason = computed(() =>
+  props.raceReached && !finished.value
+    ? `Race to ${distance.value} is reached — finish or undo`
     : '')
 
 /**
  * DIE OFFENE TRIKOTKONTROLLE — EIN ZUSTAND UND KEINE MELDUNG.
  *
- * WARUM SIE NICHT DURCH `fehler` LÄUFT
+ * WARUM SIE NICHT DURCH `error` LÄUFT
  *
  * Seit dem 14.09.2026 verschwindet eine Abweisung nach fünfzehn Sekunden
- * (FEHLER_MS in useZaehlwerk), weil sie "ein Hinweis fuer den Moment" ist:
+ * (FEHLER_MS in useScoring), weil sie "ein Hinweis fuer den Moment" ist:
  * "No time-outs left" beantwortet den Druck, der gerade danebenging. Die
  * Trikotkontrolle ist das Gegenteil — sie steht am Tisch, bis jemand sie
  * abnimmt, und der Auftraggeber verlangt ausdrücklich "am besten auch als
@@ -293,7 +293,7 @@ const zaehlsperre = computed(() =>
  * Sperre, die sich am Turniertag von der Tafel aus nicht mehr aufheben
  * lässt.
  */
-const trikotOffen = computed(() => props.zusatz?.uniformOpen ?? [])
+const uniformCheckOpen = computed(() => props.extra?.uniformOpen ?? [])
 
 /**
  * Hält die Kontrolle die Partie überhaupt noch auf?
@@ -309,9 +309,9 @@ const trikotOffen = computed(() => props.zusatz?.uniformOpen ?? [])
  * Ein Satz "nothing counts", der an einem Tisch mit 4:3 steht, wäre falsch,
  * und ein falscher Satz auf einer Tafel kostet mehr als ein fehlender.
  */
-const trikotHaeltAuf = computed(() => {
-  const lage = props.zusatz?.status ?? props.partie.status
-  return lage !== 'RUNNING' && !beendet.value
+const uniformCheckBlocks = computed(() => {
+  const ballsOnTable = props.extra?.status ?? props.match.status
+  return ballsOnTable !== 'RUNNING' && !finished.value
 })
 
 /*
@@ -333,7 +333,7 @@ const trikotHaeltAuf = computed(() => {
  * "dieses Turnier führt gar keine Kontrolle". Sie war nur nötig, um nicht
  * "erledigt" über einen Vorgang zu sagen, den es nicht gibt. Ohne die Zeile
  * gibt es nichts mehr falsch zu behaupten — und deshalb ist `uniformControl`
- * auch aus `Zusatz` und aus der Durchreiche verschwunden. Es steht weiter
+ * auch aus `Extra` und aus der Durchreiche verschwunden. Es steht weiter
  * in `competition.live_board.uniform_control`, wo es herkommt.
  *
  * DIE OFFEN-MELDUNG BLEIBT UNVERÄNDERT: dauerhaft, ohne Uhr, und VOR der
@@ -363,7 +363,7 @@ const trikotHaeltAuf = computed(() => {
  * Tafel. Auffallen tut sie durch die Farbe und die Breite, nicht durch die
  * Fläche, die sie dem Stand wegnimmt.
  */
-const shotClock = computed(() => props.zusatz?.shotClock ?? null)
+const shotClock = computed(() => props.extra?.shotClock ?? null)
 
 /**
  * Die Anordnung steht und niemand hat sie zur Kenntnis genommen.
@@ -374,8 +374,8 @@ const shotClock = computed(() => props.zusatz?.shotClock ?? null)
  * wie bei der Trikotkontrolle: die Meldung steht da, bevor am Tisch jemand
  * tippt.
  */
-const shotClockOffen = computed(() =>
-  shotClock.value !== null && shotClock.value.acknowledgedAt === null && !beendet.value)
+const shotClockPending = computed(() =>
+  shotClock.value !== null && shotClock.value.acknowledgedAt === null && !finished.value)
 
 /**
  * DER DAUERZUSTAND: bestätigt, und sie gilt weiter.
@@ -395,12 +395,12 @@ const shotClockOffen = computed(() =>
  * verschwindet. Die Shot-Clock GILT WEITER; wer nach einer Auszeit an den
  * Tisch zurückkommt, muss sehen, dass nach Uhr gespielt wird.
  */
-const shotClockGilt = computed(() =>
-  shotClock.value !== null && shotClock.value.acknowledgedAt !== null && !beendet.value)
+const shotClockActive = computed(() =>
+  shotClock.value !== null && shotClock.value.acknowledgedAt !== null && !finished.value)
 
 /** Links oder rechts — der Schiedsrichter sucht am Tisch und nicht in der Auslosung. */
-function seitenwort(seite: Seite): string {
-  return seite === props.links ? 'left' : 'right'
+function sideWord(side: Side): string {
+  return side === props.left ? 'left' : 'right'
 }
 
 /**
@@ -415,14 +415,14 @@ function seitenwort(seite: Seite): string {
  * Ist keine Obergrenze gepflegt (null heisst unbegrenzt), bleibt es bei der
  * genommenen Zahl — eine Restzahl ohne Obergrenze gibt es nicht.
  */
-function auszeitHinweis(seite: Seite): string {
-  if (props.auszeitLaeuft[seite]) return 'running · tap to end'
+function timeoutHint(side: Side): string {
+  if (props.timeoutRunning[side]) return 'running · tap to end'
 
-  const genommen = props.zusatz?.timeoutsTaken?.[seite] ?? 0
-  const erlaubt = props.zusatz?.timeoutsAllowed ?? null
+  const taken = props.extra?.timeoutsTaken?.[side] ?? 0
+  const allowed = props.extra?.timeoutsAllowed ?? null
 
-  if (erlaubt === null) return genommen === 0 ? '' : `${genommen} taken`
-  return `${Math.max(0, erlaubt - genommen)} left`
+  if (allowed === null) return taken === 0 ? '' : `${taken} taken`
+  return `${Math.max(0, allowed - taken)} left`
 }
 
 /**
@@ -437,12 +437,12 @@ function auszeitHinweis(seite: Seite): string {
  * Der Block liegt ÜBER der Leiste und nicht über der Tafel: der Stand, den
  * man gerade verändert, muss dabei sichtbar bleiben.
  */
-const block = ref<{ seite: Seite, vorzeichen: 1 | -1, eingabe: string } | null>(null)
+const block = ref<{ side: Side, sign: 1 | -1, input: string } | null>(null)
 
 /**
  * ER GEHÖRT DER PUNKTFASSUNG, UND DIE SPERRE STEHT HIER.
  *
- * Nicht nur beim Aufrufer: `blockOeffnen` ist nach aussen gereicht
+ * Nicht nur beim Aufrufer: `blockOpen` ist nach aussen gereicht
  * (defineExpose) und wird von der Tastatur der Tafel gerufen. Wer eine
  * Fläche oder eine Taste ergänzt, soll nicht versehentlich einen Zifferblock
  * in eine Fassung holen, für die er nie gedacht war — in der Satzwertung
@@ -450,8 +450,8 @@ const block = ref<{ seite: Seite, vorzeichen: 1 | -1, eingabe: string } | null>(
  * eine Fläche noch eine Zeile in der Übersicht des Schiedsrichtermenüs.
  * Der Straight Pool hat seine eigene Eingabe (die Kugelreihe).
  */
-function blockOeffnen(seite: Seite, vorzeichen: 1 | -1) {
-  if (props.modus !== 'POINT_RACE') return
+function blockOpen(side: Side, sign: 1 | -1) {
+  if (props.mode !== 'POINT_RACE') return
   /*
    * UND NICHT MEHR UEBER DIE DISTANZ HINAUS. Der Zifferblock zählt nur
    * aufwärts (alle vier Aufrufer öffnen ihn mit +1), und aufwärts ist nach
@@ -464,23 +464,23 @@ function blockOeffnen(seite: Seite, vorzeichen: 1 | -1) {
    * sich nicht öffnet, ist von einem Gerät, das hängt, nicht zu
    * unterscheiden.
    */
-  if (zaehlsperre.value) {
-    spSagen(zaehlsperre.value)
+  if (scoreLockReason.value) {
+    spSay(scoreLockReason.value)
     return
   }
-  block.value = { seite, vorzeichen, eingabe: '' }
+  block.value = { side, sign, input: '' }
 }
 
-function blockZiffer(z: string) {
+function blockDigit(z: string) {
   if (!block.value) return
   // Drei Stellen reichen: die längste Distanz im Bestand ist 200 Punkte.
-  block.value.eingabe = (block.value.eingabe + z).slice(0, 3)
+  block.value.input = (block.value.input + z).slice(0, 3)
 }
 
 /**
  * DIE OBERGRENZE EINER EINZELNEN AUFNAHME — DIE DISTANZ DER PARTIE.
  *
- * `useZaehlwerk` kennt nach oben keine Grenze; drei Stellen heissen ohne
+ * `useScoring` kennt nach oben keine Grenze; drei Stellen heissen ohne
  * weiteres 999. Eine einzelne Aufnahme, die grösser ist als die ganze
  * Distanz, kann es aber nicht geben: wer die Distanz erreicht, hat gewonnen,
  * und mehr wird nicht eingetragen. Das ist eine Grenze, die aus der Partie
@@ -489,34 +489,34 @@ function blockZiffer(z: string) {
  * Ist keine Distanz bekannt (0), bleibt es bei den drei Stellen — eine
  * geratene Grenze wäre schlimmer als keine.
  */
-const blockGrenze = computed(() => (distanz.value > 0 ? distanz.value : 999))
+const blockLimit = computed(() => (distance.value > 0 ? distance.value : 999))
 
 /**
  * Die getippte Zahl liegt über der Grenze. Der Block bleibt dann STEHEN und
  * sagt es — geschlossen und verworfen wäre für den Bediener nicht von
  * „eingetragen" zu unterscheiden.
  */
-const blockZuviel = computed(() => {
+const blockTooHigh = computed(() => {
   const b = block.value
-  if (!b || b.eingabe === '') return false
-  return Number.parseInt(b.eingabe, 10) > blockGrenze.value
+  if (!b || b.input === '') return false
+  return Number.parseInt(b.input, 10) > blockLimit.value
 })
 
-function blockFertig() {
+function blockConfirm() {
   const b = block.value
   if (!b) return
-  if (blockZuviel.value) return
-  const zahl = Number.parseInt(b.eingabe, 10)
+  if (blockTooHigh.value) return
+  const value = Number.parseInt(b.input, 10)
   block.value = null
-  if (!Number.isFinite(zahl) || zahl <= 0) return
-  emit('zaehlen', b.seite, zahl * b.vorzeichen)
+  if (!Number.isFinite(value) || value <= 0) return
+  emit('count', b.side, value * b.sign)
 }
 
-function blockLeeren() {
-  if (block.value) block.value.eingabe = ''
+function blockClear() {
+  if (block.value) block.value.input = ''
 }
 
-function blockSchliessen() {
+function blockClose() {
   block.value = null
 }
 
@@ -560,19 +560,19 @@ function blockSchliessen() {
  * 7.8 a) — und dann hat der Spieler ausgespielt und BLEIBT am Tisch. Das ist
  * ein Rack und kein Fehlstoss, und es steht deshalb bei den Rack-Flächen.
  */
-const kugelreihe = computed(() => {
-  const von = Math.max(1, Math.min(15, props.lage.rest))
-  return Array.from({ length: von }, (_, i) => von - i)
+const ballRow = computed(() => {
+  const from = Math.max(1, Math.min(15, props.ballsOnTable.rest))
+  return Array.from({ length: from }, (_, i) => from - i)
 })
 
 /** Was ein Eintrag dem Spieler am Tisch einbringt. */
-function punkteFuer(uebrig: number): number {
-  return Math.max(0, props.lage.rest - uebrig)
+function pointsFor(remaining: number): number {
+  return Math.max(0, props.ballsOnTable.rest - remaining)
 }
 
 /** Wer am Tisch ist — als Name, für die Beschriftungen. */
-const amTischName = computed(() =>
-  props.amTisch ? kurzname(props.amTisch) : '')
+const atTableName = computed(() =>
+  props.atTable ? shortName(props.atTable) : '')
 
 /**
  * Steht diese Seite auf zwei Fouls?
@@ -583,15 +583,15 @@ const amTischName = computed(() =>
  * Schiedsrichter — deshalb steht es gross in der Leiste und nicht klein in
  * einem Menü.
  */
-function aufZweiFouls(seite: Seite): boolean {
-  return props.lage.fouls[seite] >= 2
+function onTwoFouls(side: Side): boolean {
+  return props.ballsOnTable.fouls[side] >= 2
 }
 
 /** Was das nächste Standardfoul den Spieler am Tisch kostet. */
-const foulKostet = computed(() => {
-  const seite = props.amTisch
-  if (!seite) return 1
-  return props.lage.fouls[seite] >= 2 ? 16 : 1
+const foulCost = computed(() => {
+  const side = props.atTable
+  if (!side) return 1
+  return props.ballsOnTable.fouls[side] >= 2 ? 16 : 1
 })
 
 /* ------------------------------------------------------------------------
@@ -632,7 +632,7 @@ const foulKostet = computed(() => {
  * Bedienung, den man nicht sieht, und keinen, aus dem die `/` nicht mit
  * einem einzigen Druck wieder herausführt. Eine Ziffer, die in der Lage am
  * Tisch nicht liegen KANN, verschwindet nicht schweigend, sondern wird mit
- * dem Grund beantwortet (`spMeldung`).
+ * dem Grund beantwortet (`spMessage`).
  *
  * WARUM 7/9/1/3 IM STRAIGHT POOL NICHT MEHR DIE RICHTIGSTELLUNG SIND
  *
@@ -665,7 +665,7 @@ const foulKostet = computed(() => {
  * `zehner` — die Eins ist gedrückt, die zweite Ziffer steht aus.
  * `ebene2` — die `/` ist gedrückt, die seltenen Vorgänge stehen da.
  */
-const spWarte = ref<'zehner' | 'ebene2' | null>(null)
+const spPending = ref<'tens' | 'level2' | null>(null)
 
 /**
  * Die Antwort auf eine Taste, die in dieser Lage nichts bewirken konnte.
@@ -674,12 +674,12 @@ const spWarte = ref<'zehner' | 'ebene2' | null>(null)
  * eine Zeile, die stehen bliebe, läse beim nächsten Fehlstoss noch der
  * vorletzte Grund.
  */
-const spMeldung = ref('')
-let spMeldungUhr: ReturnType<typeof setTimeout> | null = null
+const spMessage = ref('')
+let spMessageTimer: ReturnType<typeof setTimeout> | null = null
 
-function spSagen(text: string) {
-  spMeldung.value = text
-  if (spMeldungUhr) clearTimeout(spMeldungUhr)
+function spSay(text: string) {
+  spMessage.value = text
+  if (spMessageTimer) clearTimeout(spMessageTimer)
   /*
    * VIER SEKUNDEN. Zwei waren zu wenig: wer eine Taste drückt und nichts
    * geschehen sieht, schaut erst DANN auf die Tafel, und bis dahin wäre die
@@ -688,25 +688,25 @@ function spSagen(text: string) {
    * der nicht mehr gilt. Dieselbe Überlegung wie bei FEHLER_MS im Zählwerk,
    * nur kürzer: dort steht die Antwort des Servers, hier die der Tafel.
    */
-  spMeldungUhr = setTimeout(() => (spMeldung.value = ''), 4000)
+  spMessageTimer = setTimeout(() => (spMessage.value = ''), 4000)
 }
 
 onBeforeUnmount(() => {
-  if (spMeldungUhr) clearTimeout(spMeldungUhr)
+  if (spMessageTimer) clearTimeout(spMessageTimer)
 })
 
-function spSchliessen() {
-  spWarte.value = null
-  spMeldung.value = ''
+function spClose() {
+  spPending.value = null
+  spMessage.value = ''
 }
 
 /**
  * Kann am Tisch überhaupt etwas eingetragen werden? Wenn nein, sagt es die
  * Tafel — dieselbe Auskunft, die auf den gesperrten Flächen steht.
  */
-function spGehtJetzt(): boolean {
-  if (beendet.value) {
-    spSagen('The match is already final')
+function spCanAct(): boolean {
+  if (finished.value) {
+    spSay('The match is already final')
     return false
   }
   /*
@@ -719,17 +719,17 @@ function spGehtJetzt(): boolean {
    * Augenblick, in dem er tippt, den Grund, der gleich nicht mehr gilt —
    * und danach gar keinen mehr, denn die Meldung steht nur vier Sekunden.
    */
-  if (zaehlsperre.value) {
-    spSagen(zaehlsperre.value)
+  if (scoreLockReason.value) {
+    spSay(scoreLockReason.value)
     return false
   }
   /*
    * UND DIE DRITTE SPERRE, DIE DIE FLÄCHEN SCHON IMMER TRAGEN.
    *
-   * `laeuft` ist wahr, solange einer der drei nicht rücknehmbaren
+   * `busy` ist wahr, solange einer der drei nicht rücknehmbaren
    * Schreibvorgänge unterwegs ist (`beenden`, `aufgeben`,
-   * `shotClockBestaetigen` in useZaehlwerk). Die Kugelreihe ist dabei
-   * `disabled`, jede Fläche bekommt `:arbeitet="laeuft"` und ist blass —
+   * `shotClockBestaetigen` in useScoring). Die Kugelreihe ist dabei
+   * `disabled`, jede Fläche bekommt `:busy="busy"` und ist blass —
    * nur die Fernbedienung kam bis zum 16.09.2026 durch. Ablauf: `/ 5`
    * beendet die Partie, der POST ist unterwegs, und ein Druck auf `+`
    * schickte eine Standänderung an eine Partie, die gerade abgeschlossen
@@ -740,12 +740,12 @@ function spGehtJetzt(): boolean {
    * Grund nicht gesehen, weil er auf den Tisch schaut und nicht auf das
    * Gerät.
    */
-  if (props.laeuft) {
-    spSagen('Still saving — one moment')
+  if (props.busy) {
+    spSay('Still saving — one moment')
     return false
   }
-  if (!props.amTisch) {
-    spSagen('Nobody is at the table yet')
+  if (!props.atTable) {
+    spSay('Nobody is at the table yet')
     return false
   }
   return true
@@ -756,25 +756,25 @@ function spGehtJetzt(): boolean {
  *
  * Die Auszeit ist der einzige Vorgang der Leiste, der KEINEN Spieler am
  * Tisch braucht: vor dem Anstoss darf sie genommen werden, und die Fläche
- * lässt sie deshalb zu (`:gesperrt="beendet"`). Nur die beendete Partie und
+ * lässt sie deshalb zu (`:locked="finished"`). Nur die beendete Partie und
  * der laufende Schreibvorgang stehen ihr im Weg.
  */
-function spAuszeitGehtJetzt(): boolean {
-  if (beendet.value) {
-    spSagen('The match is already final')
+function spTimeoutCanAct(): boolean {
+  if (finished.value) {
+    spSay('The match is already final')
     return false
   }
   /*
-   * AUCH DIE AUSZEIT — die Begründung steht bei `zaehlsperre`: sie ist das
+   * AUCH DIE AUSZEIT — die Begründung steht bei `scoreLockReason`: sie ist das
    * Recht eines Spielers WAEHREND einer Partie, und sie kostet ein
    * Guthaben, das nach zehn Sekunden nicht mehr zurückkommt.
    */
-  if (zaehlsperre.value) {
-    spSagen(zaehlsperre.value)
+  if (scoreLockReason.value) {
+    spSay(scoreLockReason.value)
     return false
   }
-  if (props.laeuft) {
-    spSagen('Still saving — one moment')
+  if (props.busy) {
+    spSay('Still saving — one moment')
     return false
   }
   return true
@@ -788,14 +788,14 @@ function spAuszeitGehtJetzt(): boolean {
  * wird mit der Zahl, die der Bediener gemeint hat, und mit dem Grund —
  * sonst stünde er vor einer Taste, die scheinbar nichts tut.
  */
-function spRest(n: number): boolean {
-  if (!spGehtJetzt()) return false
-  if (n < 1 || n > props.lage.rest) {
-    spSagen(`${n} is not possible — ${props.lage.rest} on the table`)
+function spRemaining(n: number): boolean {
+  if (!spCanAct()) return false
+  if (n < 1 || n > props.ballsOnTable.rest) {
+    spSay(`${n} is not possible — ${props.ballsOnTable.rest} on the table`)
     return false
   }
-  spSchliessen()
-  emit('rest', n)
+  spClose()
+  emit('remaining', n)
   return true
 }
 
@@ -820,9 +820,9 @@ function spRest(n: number): boolean {
  * Schreibvorgang, den niemand wollte, und er nähme einen richtigen Eintrag
  * weg. Ein Druck zu viel in der zweiten Lesart kostet nichts.
  */
-function spVorhangStern() {
-  spSchliessen()
-  spSagen(props.kannZurueck
+function spCurtainStar() {
+  spClose()
+  spSay(props.canUndo
     ? 'Cancelled — press * again to undo the last entry'
     : 'Cancelled — nothing to undo')
 }
@@ -835,30 +835,30 @@ function spVorhangStern() {
  * Bedeutung. Eine 8, die hier durchfiele, träge auf der Ebene darunter einen
  * Fehlstoss ein, den niemand gespielt hat.
  */
-function spEbeneZwei(taste: string): boolean {
-  switch (taste) {
+function spLevelTwo(key: string): boolean {
+  switch (key) {
     case '1':
-      if (spGehtJetzt()) { spSchliessen(); emit('rack', true) }
+      if (spCanAct()) { spClose(); emit('rack', true) }
       break
     case '2':
-      if (spGehtJetzt()) { spSchliessen(); emit('foul', 'BREAK_AGAIN') }
+      if (spCanAct()) { spClose(); emit('foul', 'BREAK_AGAIN') }
       break
     case '3':
-      if (spGehtJetzt()) { spSchliessen(); emit('foul', 'BREAK_ACCEPT') }
+      if (spCanAct()) { spClose(); emit('foul', 'BREAK_ACCEPT') }
       break
     /*
      * DIE AUSZEIT FRAGT NICHT NACH DEM TISCH — die Fläche auch nicht
-     * (`:gesperrt="beendet"`, ohne `!amTisch`). Wer vor dem Anstoss eine
-     * Auszeit nimmt, nimmt sie; deshalb steht hier nicht `spGehtJetzt`,
+     * (`:locked="finished"`, ohne `!atTable`). Wer vor dem Anstoss eine
+     * Auszeit nimmt, nimmt sie; deshalb steht hier nicht `spCanAct`,
      * sondern dieselben zwei Sperren, die die Fläche trägt — und beide
      * ANTWORTEN jetzt, statt die Taste zu schlucken. `/ 1` sagt in
      * derselben Lage „The match is already final"; `/ 4` schwieg.
      */
     case '4':
-      if (spAuszeitGehtJetzt()) { spSchliessen(); emit('auszeit', 'A', props.auszeitLaeuft.A) }
+      if (spTimeoutCanAct()) { spClose(); emit('timeout', 'A', props.timeoutRunning.A) }
       break
     case '6':
-      if (spAuszeitGehtJetzt()) { spSchliessen(); emit('auszeit', 'B', props.auszeitLaeuft.B) }
+      if (spTimeoutCanAct()) { spClose(); emit('timeout', 'B', props.timeoutRunning.B) }
       break
     /*
      * Die 5 ist doppelt belegt wie eh und je, und zwar nach Lage: steht die
@@ -867,15 +867,15 @@ function spEbeneZwei(taste: string): boolean {
      * Satztafel, und sie bleibt hier gleich.
      */
     case '5':
-      if (props.sieger && !beendet.value) { spSchliessen(); emit('beenden') }
-      else if (spGehtJetzt()) { spSchliessen(); emit('tisch') }
+      if (props.winner && !finished.value) { spClose(); emit('finish') }
+      else if (spCanAct()) { spClose(); emit('table') }
       break
     case '0':
     case '/':
-      spSchliessen()
+      spClose()
       break
     case '*':
-      spVorhangStern()
+      spCurtainStar()
       break
   }
   return true
@@ -884,10 +884,10 @@ function spEbeneZwei(taste: string): boolean {
 /**
  * DIE ANGEFANGENE ZEHNEREINGABE — die Eins wartet auf ihre zweite Ziffer.
  */
-function spZehner(taste: string): boolean {
+function spTens(key: string): boolean {
   // Die zweite Ziffer: 10 bis 15.
-  if (taste >= '0' && taste <= '5') {
-    spRest(10 + Number(taste))
+  if (key >= '0' && key <= '5') {
+    spRemaining(10 + Number(key))
     return true
   }
   /*
@@ -897,9 +897,9 @@ function spZehner(taste: string): boolean {
    * gerade getippt wird. Dieselbe Eindeutigkeit, aus der die ganze Belegung
    * gebaut ist.
    */
-  if (taste >= '6' && taste <= '9') {
-    spSchliessen()
-    spRest(Number(taste))
+  if (key >= '6' && key <= '9') {
+    spClose()
+    spRemaining(Number(key))
     return true
   }
   /*
@@ -907,18 +907,18 @@ function spZehner(taste: string): boolean {
    * „Eins und noch eine Ziffer" zu unterscheiden wäre. Enter ist auf jedem
    * Zifferblock die grösste Taste und liegt gleich neben der Reihe.
    */
-  if (taste === 'Enter') {
-    spRest(1)
+  if (key === 'Enter') {
+    spRemaining(1)
     return true
   }
-  if (taste === '/') {
-    spSchliessen()
+  if (key === '/') {
+    spClose()
     return true
   }
   // Das Sternchen schliesst und sagt, wie das Undo zu haben ist — siehe
   // spVorhangStern. Es ist der einzige Griff, der hier nicht geschluckt wird.
-  if (taste === '*') {
-    spVorhangStern()
+  if (key === '*') {
+    spCurtainStar()
     return true
   }
   // Auch hier gilt: solange etwas offen ist, fällt nichts durch.
@@ -932,8 +932,8 @@ function spZehner(taste: string): boolean {
  * STRAIGHT_POOL und erst, wenn der Anstoss entschieden ist — bis dahin
  * gehören 1 und 3 der Anstossfrage.
  */
-function spTaste(taste: string): boolean {
-  if (props.modus !== 'STRAIGHT_POOL') return false
+function spKey(key: string): boolean {
+  if (props.mode !== 'STRAIGHT_POOL') return false
 
   /*
    * DAS R KOMMT IMMER DURCH — auch durch einen offenen Vorhang.
@@ -947,56 +947,56 @@ function spTaste(taste: string): boolean {
    * Die Tafel behandelt die Taste selbst (siehe tafelTaste); hier steht nur,
    * dass sie nicht verbraucht wird.
    */
-  if (taste === 'r' || taste === 'R') return false
+  if (key === 'r' || key === 'R') return false
 
-  if (spWarte.value === 'ebene2') return spEbeneZwei(taste)
-  if (spWarte.value === 'zehner') return spZehner(taste)
+  if (spPending.value === 'level2') return spLevelTwo(key)
+  if (spPending.value === 'tens') return spTens(key)
 
-  if (taste === '/') {
-    spWarte.value = 'ebene2'
-    spMeldung.value = ''
+  if (key === '/') {
+    spPending.value = 'level2'
+    spMessage.value = ''
     return true
   }
 
-  if (taste >= '1' && taste <= '9') {
-    const ziffer = Number(taste)
+  if (key >= '1' && key <= '9') {
+    const digit = Number(key)
     /*
      * Die Eins wartet NUR, wenn zehn oder mehr liegen. Sonst kann sie nichts
      * anderes heissen als sich selbst, und dann ist sie sofort fertig — das
      * ist der Fall mitten im Rack und damit der häufige.
      */
-    if (ziffer === 1 && props.lage.rest >= 10) {
-      spWarte.value = 'zehner'
-      spMeldung.value = ''
+    if (digit === 1 && props.ballsOnTable.rest >= 10) {
+      spPending.value = 'tens'
+      spMessage.value = ''
       return true
     }
-    spRest(ziffer)
+    spRemaining(digit)
     return true
   }
 
-  switch (taste) {
+  switch (key) {
     case '+':
-      if (spGehtJetzt()) emit('rack', false)
+      if (spCanAct()) emit('rack', false)
       return true
     case '-':
-      if (spGehtJetzt()) emit('safety')
+      if (spCanAct()) emit('safety')
       return true
     case '.':
-      if (spGehtJetzt()) emit('foul', 'STANDARD')
+      if (spCanAct()) emit('foul', 'STANDARD')
       return true
     /*
-     * DER LAUFENDE SCHREIBVORGANG WIRD VOR `kannZurueck` GEFRAGT, UND ZWAR
+     * DER LAUFENDE SCHREIBVORGANG WIRD VOR `canUndo` GEFRAGT, UND ZWAR
      * WEGEN DER ANTWORT.
      *
-     * `kannZurueck` ist im Zählwerk als `verlauf.length > 0 && !laeuft`
+     * `canUndo` ist im Zählwerk als `verlauf.length > 0 && !laeuft`
      * gerechnet — während `beenden` unterwegs ist, ist es falsch, und die
      * Leiste hätte „Nothing to undo" gesagt. Das ist der falsche Grund:
      * zurückzunehmen gäbe es etwas, es geht nur gerade nicht.
      */
     case '*':
-      if (props.laeuft) spSagen('Still saving — one moment')
-      else if (props.kannZurueck) emit('zurueck')
-      else spSagen('Nothing to undo')
+      if (props.busy) spSay('Still saving — one moment')
+      else if (props.canUndo) emit('undo')
+      else spSay('Nothing to undo')
       return true
   }
 
@@ -1009,8 +1009,8 @@ function spTaste(taste: string): boolean {
 }
 
 /** Ob gerade etwas aussteht. Die Tafel fragt danach, bevor sie die 0 nimmt. */
-function spWartet(): boolean {
-  return spWarte.value !== null
+function spWaiting(): boolean {
+  return spPending.value !== null
 }
 
 /**
@@ -1023,9 +1023,9 @@ function spWartet(): boolean {
  * Beschriftet wird nur, was ABWEICHT: die Zehnerwerte und die Eins, solange
  * sie auf ihre Bestätigung wartet.
  */
-function spTastenfolge(n: number): string {
+function spKeySequence(n: number): string {
   if (n >= 10) return `1 ${n - 10}`
-  if (n === 1 && props.lage.rest >= 10) return '1 ⏎'
+  if (n === 1 && props.ballsOnTable.rest >= 10) return '1 ⏎'
   return ''
 }
 
@@ -1036,11 +1036,11 @@ function spTastenfolge(n: number): string {
  * und eine Taste anzubieten, die abgewiesen wird, wäre eine Einladung zum
  * Danebentippen. Die Eins selbst steht am Ende mit ihrer Bestätigung.
  */
-const spZehnerwahl = computed(() => {
-  const bis = Math.min(15, props.lage.rest)
-  const entryList: { taste: string, wert: number }[] = []
-  for (let n = 10; n <= bis; n++) entryList.push({ taste: String(n - 10), wert: n })
-  entryList.push({ taste: '⏎', wert: 1 })
+const spTensChoices = computed(() => {
+  const upTo = Math.min(15, props.ballsOnTable.rest)
+  const entryList: { key: string, value: number }[] = []
+  for (let n = 10; n <= upTo; n++) entryList.push({ key: String(n - 10), value: n })
+  entryList.push({ key: '⏎', value: 1 })
   return entryList
 })
 
@@ -1058,7 +1058,7 @@ const spZehnerwahl = computed(() => {
  * Vorhang, sobald die Eins gedrückt ist, und am Stück im Schiedsrichtermenü.
  * Eine Zeile, die alles erklärt, erklärt es an der falschen Stelle.
  */
-const spAnleitung = 'Tap what is left — or key it in'
+const spInstructions = 'Tap what is left — or key it in'
 
 /**
  * WAS DIE LEISTE NACH AUSSEN REICHT.
@@ -1067,17 +1067,17 @@ const spAnleitung = 'Tap what is left — or key it in'
  * auf der Tafel und nicht hier (board/[eventId]/[table].vue) — dort hängt er
  * am `document` und muss auch dann etwas tun, wenn gar keine Leiste steht.
  *
- * `blockOeffnen` sorgt dafür, dass die Taste „+" dasselbe tut wie die Fläche
- * „+ N" (Punktfassung). `spTaste` und `spWartet` sind die ganze
+ * `blockOpen` sorgt dafür, dass die Taste „+" dasselbe tut wie die Fläche
+ * „+ N" (Punktfassung). `spKey` und `spWaiting` sind die ganze
  * Straight-Pool-Bedienung: die Tafel reicht die Taste herein, weil hier —
  * und nur hier — bekannt ist, wie viele Kugeln liegen und welche Zahl damit
  * überhaupt gemeint sein kann.
  */
-defineExpose({ blockOeffnen, spTaste, spWartet })
+defineExpose({ blockOpen, spKey, spWaiting })
 </script>
 
 <template>
-  <div class="leiste" :class="{ 'leiste--tut': laeuft }">
+  <div class="leiste" :class="{ 'leiste--tut': busy }">
     <!--
       DIE TRIKOTKONTROLLE — GANZ OBEN UND OHNE UHR.
 
@@ -1091,15 +1091,15 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
       beim Abruf nicht der Name der einen Seite an der Zeile der anderen
       hängen bleibt.
     -->
-    <div v-if="trikotOffen.length" class="trikot" role="status">
+    <div v-if="uniformCheckOpen.length" class="trikot" role="status">
       <p class="trikot__kopf">Uniform check open</p>
       <p class="trikot__wer">
-        <span v-for="offen in trikotOffen" :key="offen.side" class="trikot__name">
+        <span v-for="offen in uniformCheckOpen" :key="offen.side" class="trikot__name">
           {{ offen.displayName }}
-          <span class="trikot__seite">{{ seitenwort(offen.side) }}</span>
+          <span class="trikot__seite">{{ sideWord(offen.side) }}</span>
         </span>
       </p>
-      <p v-if="trikotHaeltAuf" class="trikot__folge">
+      <p v-if="uniformCheckBlocks" class="trikot__folge">
         Nothing counts before it is done.
       </p>
     </div>
@@ -1140,7 +1140,7 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
       `role="status"` und nicht `alert`: ein Zustand, der gilt, bis jemand
       handelt, ist keine Unterbrechung.
     -->
-    <div v-if="shotClockOffen" class="shot-clock" role="status">
+    <div v-if="shotClockPending" class="shot-clock" role="status">
       <p class="shot-clock__kopf">Shot clock</p>
       <p class="shot-clock__folge">
         The referee has to acknowledge it — nothing counts before that.
@@ -1157,7 +1157,7 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
       Ohne Zeitangabe. "Shot clock since 14:12" sähe aus wie der Beginn einer
       laufenden Uhr, und genau die gibt es nicht.
     -->
-    <p v-else-if="shotClockGilt" class="shot-clock shot-clock--gilt" role="status">
+    <p v-else-if="shotClockActive" class="shot-clock shot-clock--gilt" role="status">
       Shot clock in force
     </p>
 
@@ -1167,23 +1167,23 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
       zum Stand. Rot heisst auf dieser Tafel "hier fehlt etwas, das gebraucht
       wird" — und eine Eingabe, die nicht angekommen ist, ist genau das.
     -->
-    <p v-if="fehler" class="leiste__fehler" role="alert">{{ fehler.text }}</p>
+    <p v-if="error" class="leiste__fehler" role="alert">{{ error.text }}</p>
 
     <!--
       DIE ERSTE FRAGE: WER STÖSST AN
       Zwei Flächen, links der linke Spieler, rechts der rechte — wie die
       Tafel darüber und wie die Tasten 1 und 3 im Vorgängersystem.
     -->
-    <div v-if="anstossOffen && !beendet" class="leiste__frage">
+    <div v-if="breakOpen && !finished" class="leiste__frage">
       <p class="leiste__frage-text">Who breaks?</p>
       <div class="leiste__frage-tasten">
-        <BoardZaehltaste
-          :beschriftung="kurzname(links)" hinweis="breaks first" taste="1"
-          art="plus" :arbeitet="laeuft" @click="emit('anstoss', links)"
+        <BoardScoreKey
+          :label="shortName(left)" hint="breaks first" key="1"
+          kind="plus" :busy="busy" @click="emit('break', left)"
         />
-        <BoardZaehltaste
-          :beschriftung="kurzname(rechts)" hinweis="breaks first" taste="3"
-          art="plus" :arbeitet="laeuft" @click="emit('anstoss', rechts)"
+        <BoardScoreKey
+          :label="shortName(right)" hint="breaks first" key="3"
+          kind="plus" :busy="busy" @click="emit('break', right)"
         />
       </div>
     </div>
@@ -1204,7 +1204,7 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
       die gehören nicht zum Straight Pool, sondern zum Betrieb, und sie
       sollen dort liegen, wo sie an jeder anderen Tafel auch liegen.
     -->
-    <div v-else-if="modus === 'STRAIGHT_POOL'" class="sp">
+    <div v-else-if="mode === 'STRAIGHT_POOL'" class="sp">
       <!--
         BAND 1 — DER ZUSTAND.
 
@@ -1220,21 +1220,21 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
       <div class="sp__lage" role="status">
         <p class="sp__tisch">
           <span class="sp__etikett">At the table</span>
-          <span class="sp__name">{{ amTischName || '—' }}</span>
+          <span class="sp__name">{{ atTableName || '—' }}</span>
         </p>
         <p class="sp__kugeln">
-          <span class="sp__zahl">{{ lage.rest }}</span>
+          <span class="sp__zahl">{{ ballsOnTable.rest }}</span>
           <span class="sp__etikett">balls on the table</span>
         </p>
-        <p class="sp__anleitung">{{ spAnleitung }}</p>
+        <p class="sp__anleitung">{{ spInstructions }}</p>
         <p class="sp__fouls">
-          <template v-for="seite in [links, rechts]" :key="seite">
+          <template v-for="side in [left, right]" :key="side">
             <span
-              v-if="lage.fouls[seite] > 0"
-              class="sp__foul" :class="{ 'sp__foul--zwei': aufZweiFouls(seite) }"
-            >{{ kurzname(seite) }}
-              <template v-if="aufZweiFouls(seite)">on two fouls</template>
-              <template v-else>{{ lage.fouls[seite] }} foul</template>
+              v-if="ballsOnTable.fouls[side] > 0"
+              class="sp__foul" :class="{ 'sp__foul--zwei': onTwoFouls(side) }"
+            >{{ shortName(side) }}
+              <template v-if="onTwoFouls(side)">on two fouls</template>
+              <template v-else>{{ ballsOnTable.fouls[side] }} foul</template>
             </span>
           </template>
         </p>
@@ -1263,23 +1263,23 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
           sich bezieht — „9 geht nicht, es liegen 8" liest sich nur dort, wo
           die 8 danebensteht.
         -->
-        <p v-if="spMeldung" class="sp__meldung" role="status">{{ spMeldung }}</p>
+        <p v-if="spMessage" class="sp__meldung" role="status">{{ spMessage }}</p>
         <div class="sp__kugeltasten" aria-label="Balls left after the miss">
           <button
-            v-for="n in kugelreihe" :key="n"
+            v-for="n in ballRow" :key="n"
             type="button" class="sp__kugel"
-            :disabled="beendet || laeuft || !amTisch || !!zaehlsperre"
-            @click="emit('rest', n)"
+            :disabled="finished || busy || !atTable || !!scoreLockReason"
+            @click="emit('remaining', n)"
           >
             <span class="sp__kugel-zahl">{{ n }}</span>
-            <span class="sp__kugel-punkte">+{{ punkteFuer(n) }}</span>
+            <span class="sp__kugel-punkte">+{{ pointsFor(n) }}</span>
             <!--
               Die Tastenfolge NUR, wo sie von der Zahl abweicht — siehe
               spTastenfolge. Unter der 7 stünde sonst noch einmal eine 7.
             -->
             <span
-              v-if="spTastenfolge(n)" class="sp__kugel-taste" aria-hidden="true"
-            >{{ spTastenfolge(n) }}</span>
+              v-if="spKeySequence(n)" class="sp__kugel-taste" aria-hidden="true"
+            >{{ spKeySequence(n) }}</span>
           </button>
         </div>
       </div>
@@ -1299,31 +1299,31 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
         ZWEIMAL da — die Begründung dafür bei den Flächen selbst.
       -->
       <div class="sp__tasten">
-        <BoardZaehltaste
-          beschriftung="Rack"
-          :hinweis="`break ball left · +${Math.max(0, lage.rest - 1)} · stays`"
-          taste="+" breite="voll" art="plus"
-          :gesperrt="beendet || !amTisch || !!zaehlsperre" :arbeitet="laeuft"
+        <BoardScoreKey
+          label="Rack"
+          :hint="`break ball left · +${Math.max(0, ballsOnTable.rest - 1)} · stays`"
+          key="+" width="voll" kind="plus"
+          :locked="finished || !atTable || !!scoreLockReason" :busy="busy"
           @click="emit('rack', false)"
         />
-        <BoardZaehltaste
-          beschriftung="Rack · 15th down"
-          :hinweis="`all fifteen · +${lage.rest} · stays`"
-          taste="/ 1" breite="voll" art="plus"
-          :gesperrt="beendet || !amTisch || !!zaehlsperre" :arbeitet="laeuft"
+        <BoardScoreKey
+          label="Rack · 15th down"
+          :hint="`all fifteen · +${ballsOnTable.rest} · stays`"
+          key="/ 1" width="voll" kind="plus"
+          :locked="finished || !atTable || !!scoreLockReason" :busy="busy"
           @click="emit('rack', true)"
         />
-        <BoardZaehltaste
-          beschriftung="Safety" hinweis="no points · turn over"
-          taste="-" breite="voll"
-          :gesperrt="beendet || !amTisch || !!zaehlsperre" :arbeitet="laeuft"
+        <BoardScoreKey
+          label="Safety" hint="no points · turn over"
+          key="-" width="voll"
+          :locked="finished || !atTable || !!scoreLockReason" :busy="busy"
           @click="emit('safety')"
         />
-        <BoardZaehltaste
-          beschriftung="Foul"
-          :hinweis="foulKostet === 16 ? 'third foul · −16 · re-rack' : '−1 · turn over'"
-          taste="." breite="voll" art="minus"
-          :gesperrt="beendet || !amTisch || !!zaehlsperre" :arbeitet="laeuft"
+        <BoardScoreKey
+          label="Foul"
+          :hint="foulCost === 16 ? 'third foul · −16 · re-rack' : '−1 · turn over'"
+          key="." width="voll" kind="minus"
+          :locked="finished || !atTable || !!scoreLockReason" :busy="busy"
           @click="emit('foul', 'STANDARD')"
         />
         <!--
@@ -1347,18 +1347,18 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
           KEINE VON BEIDEN ZÄHLT FÜR DIE DREIERFOLGE (7.11), auch beim
           fünften Fehlversuch nicht. Das steht auf beiden Flächen.
         -->
-        <BoardZaehltaste
-          beschriftung="Break foul · again"
-          hinweis="−2 · re-rack · breaker stays"
-          taste="/ 2" breite="voll" art="minus"
-          :gesperrt="beendet || !amTisch || !!zaehlsperre" :arbeitet="laeuft"
+        <BoardScoreKey
+          label="Break foul · again"
+          hint="−2 · re-rack · breaker stays"
+          key="/ 2" width="voll" kind="minus"
+          :locked="finished || !atTable || !!scoreLockReason" :busy="busy"
           @click="emit('foul', 'BREAK_AGAIN')"
         />
-        <BoardZaehltaste
-          beschriftung="Break foul · accept"
-          hinweis="−2 · balls in position · turn over"
-          taste="/ 3" breite="voll" art="minus"
-          :gesperrt="beendet || !amTisch || !!zaehlsperre" :arbeitet="laeuft"
+        <BoardScoreKey
+          label="Break foul · accept"
+          hint="−2 · balls in position · turn over"
+          key="/ 3" width="voll" kind="minus"
+          :locked="finished || !atTable || !!scoreLockReason" :busy="busy"
           @click="emit('foul', 'BREAK_ACCEPT')"
         />
       </div>
@@ -1389,16 +1389,16 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
           und Ende), sie bekommt nur die / davor. Wer die Satztafel kennt,
           muss nichts Neues lernen ausser dem Vorzeichen.
         -->
-        <BoardZaehltaste
-          beschriftung="Time out" :hinweis="auszeitHinweis(links)"
-          :taste="links === 'A' ? '/ 4' : '/ 6'" breite="voll"
-          :gesperrt="beendet || !!zaehlsperre" :arbeitet="laeuft"
-          @click="emit('auszeit', links, auszeitLaeuft[links])"
+        <BoardScoreKey
+          label="Time out" :hint="timeoutHint(left)"
+          :key="left === 'A' ? '/ 4' : '/ 6'" width="voll"
+          :locked="finished || !!scoreLockReason" :busy="busy"
+          @click="emit('timeout', left, timeoutRunning[left])"
         />
-        <BoardZaehltaste
-          beschriftung="Undo" hinweis="last entry" taste="*"
-          breite="voll" art="minus" :gesperrt="!kannZurueck"
-          :arbeitet="laeuft" @click="emit('zurueck')"
+        <BoardScoreKey
+          label="Undo" hint="last entry" key="*"
+          width="voll" kind="minus" :locked="!canUndo"
+          :busy="busy" @click="emit('undo')"
         />
         <!--
           DER TISCHWECHSEL VON HAND. Er ist keine Regel, sondern die
@@ -1411,29 +1411,29 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
           zurückgeben. Das waren zwei Einträge für einen Stoss, und ein Undo
           nahm davon die Hälfte. Dafür steht jetzt „Break foul · again".
         -->
-        <BoardZaehltaste
-          beschriftung="Switch"
-          :hinweis="amTischName ? `hand the table to ${kurzname(amTisch === 'A' ? 'B' : 'A')}` : ''"
-          :taste="sieger ? '' : '/ 5'" breite="voll"
-          :gesperrt="beendet || !amTisch || !!zaehlsperre" :arbeitet="laeuft"
-          @click="emit('tisch')"
+        <BoardScoreKey
+          label="Switch"
+          :hint="atTableName ? `hand the table to ${shortName(atTable === 'A' ? 'B' : 'A')}` : ''"
+          :key="winner ? '' : '/ 5'" width="voll"
+          :locked="finished || !atTable || !!scoreLockReason" :busy="busy"
+          @click="emit('table')"
         />
-        <BoardZaehltaste
-          beschriftung="Finish"
-          :hinweis="beendet
+        <BoardScoreKey
+          label="Finish"
+          :hint="finished
             ? 'already final'
-            : sieger
-              ? `${kurzname(sieger)} wins`
-              : `nobody has reached ${distanz}`"
-          :taste="sieger ? '/ 5' : ''" breite="voll" art="ende"
-          :gesperrt="beendet || !sieger" :arbeitet="laeuft"
-          @click="sieger && emit('beenden')"
+            : winner
+              ? `${shortName(winner)} wins`
+              : `nobody has reached ${distance}`"
+          :key="winner ? '/ 5' : ''" width="voll" kind="ende"
+          :locked="finished || !winner" :busy="busy"
+          @click="winner && emit('finish')"
         />
-        <BoardZaehltaste
-          beschriftung="Time out" :hinweis="auszeitHinweis(rechts)"
-          :taste="rechts === 'A' ? '/ 4' : '/ 6'" breite="voll"
-          :gesperrt="beendet || !!zaehlsperre" :arbeitet="laeuft"
-          @click="emit('auszeit', rechts, auszeitLaeuft[rechts])"
+        <BoardScoreKey
+          label="Time out" :hint="timeoutHint(right)"
+          :key="right === 'A' ? '/ 4' : '/ 6'" width="voll"
+          :locked="finished || !!scoreLockReason" :busy="busy"
+          @click="emit('timeout', right, timeoutRunning[right])"
         />
       </div>
     </div>
@@ -1448,39 +1448,39 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
       <!-- LINKE SEITE -->
       <div class="leiste__seite">
         <div class="leiste__reihe">
-          <BoardZaehltaste
-            :beschriftung="modus === 'POINT_RACE' ? '+1' : '+'"
-            :hinweis="kurzname(links)" :taste="links === 'A' ? '7' : '9'"
-            art="plus" :gesperrt="beendet || !!zaehlsperre" :arbeitet="laeuft"
-            @click="emit('zaehlen', links, 1)"
+          <BoardScoreKey
+            :label="mode === 'POINT_RACE' ? '+1' : '+'"
+            :hint="shortName(left)" :key="left === 'A' ? '7' : '9'"
+            kind="plus" :locked="finished || !!scoreLockReason" :busy="busy"
+            @click="emit('count', left, 1)"
           />
-          <BoardZaehltaste
-            v-if="modus === 'POINT_RACE'"
-            beschriftung="+ N" hinweis="run" taste="+"
-            breite="schmal" art="plus" :gesperrt="beendet || !!zaehlsperre"
-            :arbeitet="laeuft"
-            @click="blockOeffnen(links, 1)"
+          <BoardScoreKey
+            v-if="mode === 'POINT_RACE'"
+            label="+ N" hint="run" key="+"
+            width="schmal" kind="plus" :locked="finished || !!scoreLockReason"
+            :busy="busy"
+            @click="blockOpen(left, 1)"
           />
-          <BoardZaehltaste
-            beschriftung="−" :taste="links === 'A' ? '1' : '3'"
-            breite="schmal" art="minus" :gesperrt="beendet || stand[links] <= 0"
-            :arbeitet="laeuft" @click="emit('zaehlen', links, -1)"
+          <BoardScoreKey
+            label="−" :key="left === 'A' ? '1' : '3'"
+            width="schmal" kind="minus" :locked="finished || score[left] <= 0"
+            :busy="busy" @click="emit('count', left, -1)"
           />
         </div>
-        <BoardZaehltaste
-          beschriftung="Time out" :hinweis="auszeitHinweis(links)"
-          :taste="links === 'A' ? '4' : '6'" breite="voll"
-          :gesperrt="beendet || !!zaehlsperre" :arbeitet="laeuft"
-          @click="emit('auszeit', links, auszeitLaeuft[links])"
+        <BoardScoreKey
+          label="Time out" :hint="timeoutHint(left)"
+          :key="left === 'A' ? '4' : '6'" width="voll"
+          :locked="finished || !!scoreLockReason" :busy="busy"
+          @click="emit('timeout', left, timeoutRunning[left])"
         />
       </div>
 
       <!-- MITTE: was beide angeht -->
       <div class="leiste__mitte">
-        <BoardZaehltaste
-          beschriftung="Undo" hinweis="last entry" taste="*"
-          breite="voll" art="minus" :gesperrt="!kannZurueck"
-          :arbeitet="laeuft" @click="emit('zurueck')"
+        <BoardScoreKey
+          label="Undo" hint="last entry" key="*"
+          width="voll" kind="minus" :locked="!canUndo"
+          :busy="busy" @click="emit('undo')"
         />
         <!--
           Der Wechsel steht NUR in der Punktfassung. Im Vorgängersystem heisst
@@ -1489,54 +1489,54 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
           nicht, und hier deshalb auch nicht: wer anstösst, folgt der Regel
           des Turniers und wird über die Anstoßfrage gesetzt.
         -->
-        <BoardZaehltaste
-          v-if="modus === 'POINT_RACE'"
-          beschriftung="End of turn"
-          :hinweis="zusatz?.nextBreak ? `${kurzname(zusatz.nextBreak)} is at the table` : ''"
-          :taste="sieger ? '' : '5'" breite="voll"
-          :gesperrt="beendet || !!zaehlsperre" :arbeitet="laeuft"
-          @click="emit('anstoss', zusatz?.nextBreak === 'A' ? 'B' : 'A')"
+        <BoardScoreKey
+          v-if="mode === 'POINT_RACE'"
+          label="End of turn"
+          :hint="extra?.nextBreak ? `${shortName(extra.nextBreak)} is at the table` : ''"
+          :key="winner ? '' : '5'" width="voll"
+          :locked="finished || !!scoreLockReason" :busy="busy"
+          @click="emit('break', extra?.nextBreak === 'A' ? 'B' : 'A')"
         />
-        <BoardZaehltaste
-          beschriftung="Finish"
-          :hinweis="beendet
+        <BoardScoreKey
+          label="Finish"
+          :hint="finished
             ? 'already final'
-            : sieger
-              ? `${kurzname(sieger)} wins`
-              : `nobody has reached ${distanz}`"
-          :taste="sieger ? '5' : ''" breite="voll" art="ende"
-          :gesperrt="beendet || !sieger" :arbeitet="laeuft"
-          @click="sieger && emit('beenden')"
+            : winner
+              ? `${shortName(winner)} wins`
+              : `nobody has reached ${distance}`"
+          :key="winner ? '5' : ''" width="voll" kind="ende"
+          :locked="finished || !winner" :busy="busy"
+          @click="winner && emit('finish')"
         />
       </div>
 
       <!-- RECHTE SEITE, gespiegelt: das Plus aussen, das Minus zur Mitte -->
       <div class="leiste__seite">
         <div class="leiste__reihe">
-          <BoardZaehltaste
-            beschriftung="−" :taste="rechts === 'A' ? '1' : '3'"
-            breite="schmal" art="minus" :gesperrt="beendet || stand[rechts] <= 0"
-            :arbeitet="laeuft" @click="emit('zaehlen', rechts, -1)"
+          <BoardScoreKey
+            label="−" :key="right === 'A' ? '1' : '3'"
+            width="schmal" kind="minus" :locked="finished || score[right] <= 0"
+            :busy="busy" @click="emit('count', right, -1)"
           />
-          <BoardZaehltaste
-            v-if="modus === 'POINT_RACE'"
-            beschriftung="+ N" hinweis="run" taste="+"
-            breite="schmal" art="plus" :gesperrt="beendet || !!zaehlsperre"
-            :arbeitet="laeuft"
-            @click="blockOeffnen(rechts, 1)"
+          <BoardScoreKey
+            v-if="mode === 'POINT_RACE'"
+            label="+ N" hint="run" key="+"
+            width="schmal" kind="plus" :locked="finished || !!scoreLockReason"
+            :busy="busy"
+            @click="blockOpen(right, 1)"
           />
-          <BoardZaehltaste
-            :beschriftung="modus === 'POINT_RACE' ? '+1' : '+'"
-            :hinweis="kurzname(rechts)" :taste="rechts === 'A' ? '7' : '9'"
-            art="plus" :gesperrt="beendet || !!zaehlsperre" :arbeitet="laeuft"
-            @click="emit('zaehlen', rechts, 1)"
+          <BoardScoreKey
+            :label="mode === 'POINT_RACE' ? '+1' : '+'"
+            :hint="shortName(right)" :key="right === 'A' ? '7' : '9'"
+            kind="plus" :locked="finished || !!scoreLockReason" :busy="busy"
+            @click="emit('count', right, 1)"
           />
         </div>
-        <BoardZaehltaste
-          beschriftung="Time out" :hinweis="auszeitHinweis(rechts)"
-          :taste="rechts === 'A' ? '4' : '6'" breite="voll"
-          :gesperrt="beendet || !!zaehlsperre" :arbeitet="laeuft"
-          @click="emit('auszeit', rechts, auszeitLaeuft[rechts])"
+        <BoardScoreKey
+          label="Time out" :hint="timeoutHint(right)"
+          :key="right === 'A' ? '4' : '6'" width="voll"
+          :locked="finished || !!scoreLockReason" :busy="busy"
+          @click="emit('timeout', right, timeoutRunning[right])"
         />
       </div>
     </div>
@@ -1562,16 +1562,16 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
       `role="status"` und nicht `alert`: es ist ein Zustand, den der Bediener
       selbst herbeigeführt hat, und keine Unterbrechung.
     -->
-    <div v-if="spWarte" class="spblock" role="status">
-      <template v-if="spWarte === 'zehner'">
+    <div v-if="spPending" class="spblock" role="status">
+      <template v-if="spPending === 'tens'">
         <p class="spblock__kopf">
           Balls left
           <span class="spblock__zahl">1<span class="spblock__strich">_</span></span>
         </p>
         <div class="spblock__wahlen">
-          <span v-for="w in spZehnerwahl" :key="w.wert" class="spblock__wahl">
-            <b class="spblock__taste">{{ w.taste }}</b>
-            <span class="spblock__wort">{{ w.wert }}</span>
+          <span v-for="w in spTensChoices" :key="w.value" class="spblock__wahl">
+            <b class="spblock__taste">{{ w.key }}</b>
+            <span class="spblock__wort">{{ w.value }}</span>
           </span>
         </div>
       </template>
@@ -1596,22 +1596,22 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
           </span>
           <span class="spblock__wahl">
             <b class="spblock__taste">4</b>
-            <span class="spblock__wort">Time out {{ kurzname('A') }}</span>
+            <span class="spblock__wort">Time out {{ shortName('A') }}</span>
           </span>
           <span class="spblock__wahl">
             <b class="spblock__taste">5</b>
-            <span class="spblock__wort">{{ sieger ? 'Finish' : 'Switch' }}</span>
+            <span class="spblock__wort">{{ winner ? 'Finish' : 'Switch' }}</span>
           </span>
           <span class="spblock__wahl">
             <b class="spblock__taste">6</b>
-            <span class="spblock__wort">Time out {{ kurzname('B') }}</span>
+            <span class="spblock__wort">Time out {{ shortName('B') }}</span>
           </span>
         </div>
       </template>
 
-      <p v-if="spMeldung" class="spblock__meldung">{{ spMeldung }}</p>
+      <p v-if="spMessage" class="spblock__meldung">{{ spMessage }}</p>
 
-      <button type="button" class="spblock__weg" @click="spSchliessen()">
+      <button type="button" class="spblock__weg" @click="spClose()">
         Cancel <span class="spblock__weg-taste" aria-hidden="true">/</span>
       </button>
     </div>
@@ -1623,18 +1623,18 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
     -->
     <div v-if="block" class="block">
       <p class="block__kopf">
-        Add to {{ kurzname(block.seite) }}
-        <span class="block__zahl">{{ block.eingabe || '0' }}</span>
+        Add to {{ shortName(block.side) }}
+        <span class="block__zahl">{{ block.input || '0' }}</span>
       </p>
       <div class="block__ziffern">
         <button
           v-for="z in ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0']"
-          :key="z" type="button" class="block__ziffer" @click="blockZiffer(z)"
+          :key="z" type="button" class="block__ziffer" @click="blockDigit(z)"
         >{{ z }}</button>
-        <button type="button" class="block__ziffer" @click="blockLeeren()">C</button>
+        <button type="button" class="block__ziffer" @click="blockClear()">C</button>
         <button
           type="button" class="block__ziffer block__ziffer--ok"
-          :disabled="blockZuviel" @click="blockFertig()"
+          :disabled="blockTooHigh" @click="blockConfirm()"
         >
           OK
         </button>
@@ -1644,10 +1644,10 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
         eine Zeile, die bei jedem Öffnen „max 100" sagt, wird nach dem
         dritten Mal nicht mehr gelesen.
       -->
-      <p v-if="blockZuviel" class="block__zuviel">
-        {{ blockGrenze }} is the race — that cannot be one turn
+      <p v-if="blockTooHigh" class="block__zuviel">
+        {{ blockLimit }} is the race — that cannot be one turn
       </p>
-      <button type="button" class="block__weg" @click="blockSchliessen()">Cancel</button>
+      <button type="button" class="block__weg" @click="blockClose()">Cancel</button>
     </div>
   </div>
 </template>
@@ -1830,7 +1830,7 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
   justify-content: center;
   gap: 0.2dvh;
   /*
-   * 7.5dvh statt der 9dvh einer BoardZaehltaste — und das ist keine Ausnahme
+   * 7.5dvh statt der 9dvh einer BoardScoreKey — und das ist keine Ausnahme
    * von der Ergonomie, sondern die Folge der Form. Eine Zahl braucht keine
    * zwei Zeilen: die Fläche ist so BREIT wie ein Sechzehntel der Tafel und
    * damit an der Stelle, auf die der Finger zielt, grösser als jede Taste
@@ -1870,7 +1870,7 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
 /*
  * Die Tastenfolge — nur dort, wo sie von der Zahl abweicht.
  *
- * EINE EIGENE ZEILE UND KEINE ECKE, anders als bei BoardZaehltaste. Deren
+ * EINE EIGENE ZEILE UND KEINE ECKE, anders als bei BoardScoreKey. Deren
  * Ecke ist frei; hier steht in der Mitte eine Zahl in 3.6dvh, und eine Fläche
  * von einem Sechzehntel Tafelbreite hat in keiner Ecke Platz für zwei
  * Zeichen, ohne dass sie in dieser Zahl lägen oder am Rand abgeschnitten
@@ -1939,7 +1939,7 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
  * FÜNF UND SECHS FLÄCHEN IN EINER REIHE TRAGEN KÜRZERE SCHRIFT — UND ALLE
  * DIESELBE.
  *
- * BoardZaehltaste rechnet je Fläche aus ihrer eigenen Beschriftung aus, wie
+ * BoardScoreKey rechnet je Fläche aus ihrer eigenen Beschriftung aus, wie
  * gross die Schrift höchstens werden darf. Für eine einzelne Fläche ist das
  * richtig; für eine REIHE wäre es falsch: „RACK" stünde doppelt so gross da
  * wie „BREAK FOUL · ACCEPT" daneben, und eine Reihe mit sechs verschiedenen
@@ -1951,7 +1951,7 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
  * längste passt, für jede.
  *
  * Gerechnet wird in `cqw` — Hundertsteln der FLÄCHE — und nicht mehr in
- * `vw`; die Begründung steht in BoardZaehltaste am Container.
+ * `vw`; die Begründung steht in BoardScoreKey am Container.
  */
 .sp__tasten :deep(.taste__wort),
 .sp__betrieb :deep(.taste__wort) {
@@ -2189,7 +2189,7 @@ defineExpose({ blockOeffnen, spTaste, spWartet })
  * "The referee has to acknowledge it" sagt dem, der davorsteht, wen er
  * holen muss. Die Geste steht hier NICHT — vor der Tafel stehen die
  * Spieler, und ein Satz, der den Griff verrät, wäre die Anleitung zum
- * Wegklicken. Denselben Wortlaut führt die Abweisung in useZaehlwerk, und
+ * Wegklicken. Denselben Wortlaut führt die Abweisung in useScoring, und
  * zwar mit Absicht: zweimal dieselbe Auskunft ist besser als zwei, die sich
  * leicht unterscheiden.
  */

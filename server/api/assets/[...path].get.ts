@@ -7,7 +7,7 @@
  * Kopffeld. Diese Route setzt ihn, wie bei jeder anderen Server-zu-Server-
  * Abfrage dieser Seite.
  *
- * Ein Platzhalter über alle Adressstücke (`[...pfad]`) und nicht zwei
+ * Ein Platzhalter über alle Adressstücke (`[...path]`) und nicht zwei
  * Routen: die Anwendung kennt heute das Original und die Variante THUMB,
  * und wenn morgen eine dritte dazukommt, reicht diese Route sie ebenfalls
  * durch. Geprüft wird trotzdem streng — was hier ankommt, ist eine
@@ -18,29 +18,29 @@
  * Öffentliches darauf zeigt; wer eine Kennung rät, bekommt 404.
  */
 export default defineEventHandler(async (event) => {
-  const roh = String(getRouterParam(event, 'pfad') ?? '')
+  const raw = String(getRouterParam(event, 'path') ?? '')
 
   // <uuid> oder <uuid>/<VARIANTE>. Nichts anderes, und vor allem keine
   // Punkte: ein "../" in dieser Stelle wäre ein Pfad in fremde Endpunkte.
-  const treffer = roh.match(/^([0-9a-f-]{36})(?:\/([A-Za-z0-9_]{1,20}))?$/i)
-  if (!treffer) {
+  const match = raw.match(/^([0-9a-f-]{36})(?:\/([A-Za-z0-9_]{1,20}))?$/i)
+  if (!match) {
     throw createError({ statusCode: 400, statusMessage: 'Keine Bildkennung' })
   }
-  const [, id, variante] = treffer
+  const [, id, variant] = match
 
-  const basis = String(process.env.BB_API ?? '')
-  if (!basis) {
+  const base = String(process.env.BB_API ?? '')
+  if (!base) {
     throw createError({ statusCode: 503, statusMessage: 'Bilder nicht erreichbar' })
   }
 
-  const ziel = `${basis}/api/public/v1/assets/${id}${variante ? `/${variante}` : ''}`
-  const antwort = await $fetch.raw<ArrayBuffer>(ziel, {
+  const target = `${base}/api/public/v1/assets/${id}${variant ? `/${variant}` : ''}`
+  const response = await $fetch.raw<ArrayBuffer>(target, {
     headers: { 'X-BB-Site': String(process.env.BB_SITE ?? '') },
     responseType: 'arrayBuffer',
     timeout: 15_000,
   })
 
-  setHeader(event, 'content-type', antwort.headers.get('content-type') ?? 'application/octet-stream')
+  setHeader(event, 'content-type', response.headers.get('content-type') ?? 'application/octet-stream')
   /*
    * Dreissig Tage, und das ist sicher: die Kennung eines Bildes ist seine
    * Kennung. Wird ein Artikel mit einem anderen Bild versehen, steht dort
@@ -51,8 +51,8 @@ export default defineEventHandler(async (event) => {
   setHeader(event, 'cache-control', 'public, max-age=2592000, immutable')
   // Nitro nimmt hier eine Zahl. Der Kopf kommt als Zeichenkette an, und
   // eine unlesbare wird still uebergangen statt eine NaN zu setzen.
-  const laenge = Number.parseInt(antwort.headers.get('content-length') ?? '', 10)
-  if (Number.isFinite(laenge)) setHeader(event, 'content-length', laenge)
+  const length = Number.parseInt(response.headers.get('content-length') ?? '', 10)
+  if (Number.isFinite(length)) setHeader(event, 'content-length', length)
 
   /*
    * Buffer und nicht der ArrayBuffer selbst. Nitro reicht einen Buffer roh
@@ -67,5 +67,5 @@ export default defineEventHandler(async (event) => {
    * hiesse hier, @types/node nur für diese eine Zeile aufzunehmen.
    * Uint8Array steht im Browser wie in Node und tut dasselbe.
    */
-  return new Uint8Array(antwort._data as ArrayBuffer)
+  return new Uint8Array(response._data as ArrayBuffer)
 })

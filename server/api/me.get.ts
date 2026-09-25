@@ -6,13 +6,13 @@
  * Protokoll jedes anonymen Besuchers wäre Lärm.
  */
 export default defineEventHandler(async (event) => {
-  const sitzung = getCookie(event, 'bb_session')
-  const basis = String(process.env.BB_API ?? '')
-  if (!sitzung || !basis) return null
+  const session = getCookie(event, 'bb_session')
+  const base = String(process.env.BB_API ?? '')
+  if (!session || !base) return null
 
   const a = await $fetch<{ user?: unknown, adminUi?: boolean, player?: unknown }>(
-    `${basis}/api/admin/v1/me`,
-    { headers: { cookie: `bb_session=${sitzung}` }, timeout: 10_000 },
+    `${base}/api/admin/v1/me`,
+    { headers: { cookie: `bb_session=${session}` }, timeout: 10_000 },
   ).catch(() => null)
 
   // Die Anwendung antwortet auch ohne gültige Sitzung mit einem Rumpf, in

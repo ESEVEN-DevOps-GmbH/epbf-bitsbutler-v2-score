@@ -24,11 +24,11 @@
  * weggeworfen.
  */
 export default defineEventHandler(async (event) => {
-  if (!haeltFreigabe(event)) {
+  if (!hasGrant(event)) {
     return { released: false, eventId: null, tableNumber: null }
   }
 
-  const eigener = await vonDerVerwaltung<{
+  const own = await fromAdmin<{
     eventId: string | null, tableNumber: number | null
   }>(event, '/board/grant/live')
 
@@ -36,13 +36,13 @@ export default defineEventHandler(async (event) => {
   // liegt noch im Browser, und die Antwort darauf ist "du hältst keine" und
   // nicht "kaputt". Der Schirm zeigt dann wieder das Codefeld, und das ist
   // genau der nächste Schritt.
-  if (!eigener) {
+  if (!own) {
     return { released: false, eventId: null, tableNumber: null }
   }
 
   return {
     released: true,
-    eventId: eigener.eventId,
-    tableNumber: eigener.tableNumber,
+    eventId: own.eventId,
+    tableNumber: own.tableNumber,
   }
 })

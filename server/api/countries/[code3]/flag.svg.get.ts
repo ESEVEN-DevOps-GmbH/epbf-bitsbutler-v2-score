@@ -12,26 +12,26 @@
  * Hier braucht es ihn auch nicht: es gibt nur ein Länderverzeichnis.
  */
 export default defineEventHandler(async (event) => {
-  const roh = String(getRouterParam(event, 'code3') ?? '').replace(/\.svg$/i, '')
+  const raw = String(getRouterParam(event, 'code3') ?? '').replace(/\.svg$/i, '')
   // Alles aus der Adresse ist eine Behauptung. Der Bestand führt drei- und
   // vierstellige Kennungen (EPBF ist vier), mehr geht nicht durch.
-  if (!/^[A-Za-z]{3,4}$/.test(roh)) {
+  if (!/^[A-Za-z]{3,4}$/.test(raw)) {
     throw createError({ statusCode: 400, statusMessage: 'Kein Länderkürzel' })
   }
 
-  const basis = String(process.env.BB_API ?? '')
-  if (!basis) {
+  const base = String(process.env.BB_API ?? '')
+  if (!base) {
     throw createError({ statusCode: 503, statusMessage: 'Flagge nicht erreichbar' })
   }
 
-  const antwort = await $fetch.raw<string>(
-    `${basis}/api/public/v1/countries/${roh.toUpperCase()}/flag.svg`,
+  const response = await $fetch.raw<string>(
+    `${base}/api/public/v1/countries/${raw.toUpperCase()}/flag.svg`,
     { responseType: 'text', timeout: 5_000 },
   )
 
-  setHeader(event, 'content-type', antwort.headers.get('content-type') ?? 'image/svg+xml')
+  setHeader(event, 'content-type', response.headers.get('content-type') ?? 'image/svg+xml')
   // Ein Tag. Eine Flagge ändert sich seltener als alles andere auf dieser
   // Seite; sie jedes Mal neu zu holen wäre eine Anfrage je Tabellenzeile.
   setHeader(event, 'cache-control', 'public, max-age=86400')
-  return String(antwort._data ?? '')
+  return String(response._data ?? '')
 })

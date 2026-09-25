@@ -22,13 +22,13 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  * Zahl ist, hat in keiner Abfrage etwas verloren.
  */
 export function parseId(raw: unknown, what: string): string {
-  const wert = String(raw ?? '').trim()
+  const value = String(raw ?? '').trim()
 
-  if (UUID.test(wert)) return wert
+  if (UUID.test(value)) return value
 
-  if (/^[0-9]+$/.test(wert)) {
-    const zahl = Number.parseInt(wert, 10)
-    if (zahl > 0 && zahl <= 9_999_999) return wert
+  if (/^[0-9]+$/.test(value)) {
+    const number = Number.parseInt(value, 10)
+    if (number > 0 && number <= 9_999_999) return value
   }
 
   throw createError({ statusCode: 400, statusMessage: `Ungültige ${what}` })
@@ -68,12 +68,12 @@ export function parseId(raw: unknown, what: string): string {
  * Zwischenspeicher-Schlüssel aus demselben Aufruf ab, und die beiden müssen
  * dieselbe Frage beantworten.
  */
-export function kanonischeKennung(roh: unknown, was: string): string | undefined {
-  if (typeof roh !== 'string' || !roh) return undefined
+export function canonicalId(raw: unknown, what: string): string | undefined {
+  if (typeof raw !== 'string' || !raw) return undefined
 
-  const geprueft = parseId(roh, was)
-  if (UUID.test(geprueft)) return geprueft.toLowerCase()
-  return String(Number.parseInt(geprueft, 10))
+  const checked = parseId(raw, what)
+  if (UUID.test(checked)) return checked.toLowerCase()
+  return String(Number.parseInt(checked, 10))
 }
 
 /**
@@ -89,10 +89,10 @@ export function kanonischeKennung(roh: unknown, was: string): string | undefined
  * beginnen oder enden darf er auch nicht.
  */
 export function parseSlug(raw: unknown, what: string): string {
-  const wert = String(raw ?? '').trim().toLowerCase()
+  const value = String(raw ?? '').trim().toLowerCase()
 
-  if (/^[a-z0-9]+(?:[-/][a-z0-9]+)*$/.test(wert) && wert.length <= 120) {
-    return wert
+  if (/^[a-z0-9]+(?:[-/][a-z0-9]+)*$/.test(value) && value.length <= 120) {
+    return value
   }
 
   throw createError({ statusCode: 400, statusMessage: `Ungültige ${what}` })
@@ -107,12 +107,12 @@ export function parseSlug(raw: unknown, what: string): string {
  * auf einen Fehler. Die Grenze prüft jetzt nur noch, dass überhaupt eine
  * Jahreszahl dasteht — welche Jahre es gibt, weiß die Anwendung.
  */
-export const KALENDER_JAHR_MIN = 1900
-export const KALENDER_JAHR_MAX = 2100
+export const CALENDAR_YEAR_MIN = 1900
+export const CALENDAR_YEAR_MAX = 2100
 
 export function parseYear(raw: unknown): number {
   const year = Number.parseInt(String(raw ?? ''), 10)
-  if (!Number.isInteger(year) || year < KALENDER_JAHR_MIN || year > KALENDER_JAHR_MAX) {
+  if (!Number.isInteger(year) || year < CALENDAR_YEAR_MIN || year > CALENDAR_YEAR_MAX) {
     throw createError({ statusCode: 400, statusMessage: 'Ungültiges Jahr' })
   }
   return year

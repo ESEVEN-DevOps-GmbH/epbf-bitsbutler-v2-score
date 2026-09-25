@@ -88,7 +88,7 @@
  *
  * KEIN GEHEIMNIS: Sie steht in jeder ausgelieferten Seite im Pfad der
  * Bündel (`/_nuxt/…`) und öffentlich in `latest.json`. Was die Tafel
- * DARAUFHIN tut, entscheidet sie selbst (app/composables/useFassungswechsel.ts).
+ * DARAUFHIN tut, entscheidet sie selbst (app/composables/useVersionSwitch.ts).
  *
  * DIE WERTUNGSART STEHT SEIT DEM 17.09.2026 NICHT MEHR HIER
  *
@@ -109,7 +109,7 @@
  */
 
 /** Was `competition.live_board` je Partie liefert — nur die gelesenen Felder. */
-interface LiveZeile {
+interface LiveRow {
   match_id: string
   table_number: number | null
   status: string
@@ -148,9 +148,9 @@ interface LiveZeile {
 export default defineEventHandler(async (event) => {
   const eventId = parseId(getRouterParam(event, 'eventId'), 'Veranstaltungskennung')
 
-  const roh = String(getRouterParam(event, 'number') ?? '')
-  const nummer = Number.parseInt(roh, 10)
-  if (!/^[0-9]{1,3}$/.test(roh) || nummer < 1) {
+  const raw = String(getRouterParam(event, 'number') ?? '')
+  const tableNumber = Number.parseInt(raw, 10)
+  if (!/^[0-9]{1,3}$/.test(raw) || tableNumber < 1) {
     throw createError({ statusCode: 400, statusMessage: 'Keine Tischnummer' })
   }
 
@@ -168,10 +168,10 @@ export default defineEventHandler(async (event) => {
    */
   const buildId = useRuntimeConfig(event).app.buildId
 
-  const angemeldet = istAngemeldet(event)
-  const freigabe = haeltFreigabe(event)
+  const signedIn = isSignedIn(event)
+  const granted = hasGrant(event)
 
-  let rowRec: LiveZeile | null = null
+  let rowRec: LiveRow | null = null
 
   /*
    * ZWEI WEGE, UND KEIN `else` DAZWISCHEN.
@@ -191,8 +191,8 @@ export default defineEventHandler(async (event) => {
    * die AUSKUNFT — der Urheber bleibt trotzdem er (siehe
    * BoardGrantFilter: die Freigabe leiht Ort und Haus, nicht das Etikett).
    */
-  const alle = angemeldet
-    ? await vonDerVerwaltung<LiveZeile[]>(event, `/events/${eventId}/live`)
+  const liveRows = signedIn
+    ? await fromAdmin<LiveRow[]>(event, `/events/${eventId}/live`)
     : null
 
   /*
@@ -202,8 +202,8 @@ export default defineEventHandler(async (event) => {
    * keine Partie liegt, bekommt eine leere Liste zurück — er darf deshalb
    * nicht als „darf hier nicht zählen" dastehen.
    */
-  const darfAngemeldet = alle !== null
-  if (alle) rowRec = alle.find(z => z.table_number === nummer) ?? null
+  const canReadAsPerson = liveRows !== null
+  if (liveRows) rowRec = liveRows.find(z => z.table_number === tableNumber) ?? null
 
   /*
    * Die Freigabe wird gefragt, sobald eine anliegt — auch dann, wenn der
@@ -217,13 +217,13 @@ export default defineEventHandler(async (event) => {
    * Dieselbe Abwägung und derselbe Preis wie im BoardGrantFilter, der die
    * Freigabe aus demselben Grund immer nachschlägt.
    */
-  let ueberFreigabe = false
+  let viaGrant = false
   /** Was der Server über den Weg sagt, wenn eine Freigabe anliegt. */
-  let wegLautServer: string | null = null
-  if (freigabe) {
-    const eigener = await vonDerVerwaltung<{
+  let wayFromServer: string | null = null
+  if (granted) {
+    const own = await fromAdmin<{
       eventId: string | null, tableNumber: number | null, via: string | null,
-      match: LiveZeile | null
+      match: LiveRow | null
     }>(event, '/board/grant/live')
 
     /*
@@ -234,7 +234,7 @@ export default defineEventHandler(async (event) => {
      * Tisch das Gerät steht. Deshalb steht er vor der Prüfung darunter und
      * nicht darin.
      */
-    if (eigener) wegLautServer = eigener.via ?? null
+    if (own) wayFromServer = own.via ?? null
 
     /*
      * DIE FREIGABE GILT FÜR EINEN TISCH UND FÜR EINE VERANSTALTUNG.
@@ -246,18 +246,18 @@ export default defineEventHandler(async (event) => {
      * 7 zu SEHEN (das darf jeder, sie ist öffentlich) — aber keine
      * Bedienflächen und keine Trikotkontrolle.
      */
-    if (eigener && eigener.eventId === eventId && eigener.tableNumber === nummer) {
-      ueberFreigabe = true
+    if (own && own.eventId === eventId && own.tableNumber === tableNumber) {
+      viaGrant = true
       // Die Zeile des Angemeldeten hat Vorrang: sie ist dieselbe Auskunft
       // aus derselben Sicht, und wer sie bekommen hat, soll sie behalten.
-      rowRec = rowRec ?? eigener.match
+      rowRec = rowRec ?? own.match
     }
   }
 
   /* ------------------------------------------------------------------------
    * WIE GEHANDELT WIRD — GEFRAGT UND NICHT GERATEN
    *
-   * Hier stand `signedIn: istAngemeldet(event)`, und das war die Frage, ob
+   * Hier stand `signedIn: isSignedIn(event)`, und das war die Frage, ob
    * im Browser ein Keks namens `bb_session` LIEGT. Ob er noch trägt, sagt
    * sie nicht. Ein toter Keks aus einer Anmeldung von vorgestern liegt
    * genauso da wie ein lebender, und die Tafel hat ihn für einen Menschen
@@ -268,7 +268,7 @@ export default defineEventHandler(async (event) => {
    * unten „This account may not score at this event", also etwas über ein
    * KONTO, obwohl an diesem Gerät gar keines mehr anlag.
    *
-   * Erschwerend kam dazu, dass `weiterzureichendeKekse` beide Kekse
+   * Erschwerend kam dazu, dass `forwardedCookies` beide Kekse
    * gemeinsam schickt: welcher von beiden getragen hat, liesse sich von
    * hier aus mit keiner Angabe der Welt feststellen. Das kann nur der
    * Server sagen, und er sagt es jetzt.
@@ -294,9 +294,9 @@ export default defineEventHandler(async (event) => {
    * wegzulassen. Das wäre eine Frage mehr je Gerät und je zehn Sekunden für
    * eine Auskunft, die in der Antwort daneben schon steht.
    * --------------------------------------------------------------------- */
-  async function handelnder(): Promise<'PERSON' | 'DEVICE' | null> {
-    if (wegLautServer !== null) return wegLautServer === 'BOARD' ? 'DEVICE' : 'PERSON'
-    if (darfAngemeldet) return 'PERSON'
+  async function resolveActingAs(): Promise<'PERSON' | 'DEVICE' | null> {
+    if (wayFromServer !== null) return wayFromServer === 'BOARD' ? 'DEVICE' : 'PERSON'
+    if (canReadAsPerson) return 'PERSON'
     /*
      * Ohne Sitzungskeks ist hier Schluss, und zwar mit `null` und nicht mit
      * 'DEVICE': dass ein Freigabekeks im Browser LIEGT, heisst nichts — wer
@@ -304,12 +304,12 @@ export default defineEventHandler(async (event) => {
      * damit trägt die Freigabe nicht mehr. Ein 'DEVICE' wäre dieselbe
      * Vermutung aus einem Keks, die oben gerade abgeschafft wurde.
      */
-    if (!angemeldet) return null
-    const ich = await vonDerVerwaltung<{ user: unknown }>(event, '/me')
-    return ich?.user ? 'PERSON' : null
+    if (!signedIn) return null
+    const me = await fromAdmin<{ user: unknown }>(event, '/me')
+    return me?.user ? 'PERSON' : null
   }
 
-  const actingAs = await handelnder()
+  const actingAs = await resolveActingAs()
 
   /*
    * `null` und kein Fehler, wenn niemand angemeldet ist oder das Recht
@@ -321,7 +321,7 @@ export default defineEventHandler(async (event) => {
    * über das Konto entsteht: ein ausgewiesener Mensch, der an dieser
    * Veranstaltung nicht zählen darf.
    */
-  if (!darfAngemeldet && !ueberFreigabe) {
+  if (!canReadAsPerson && !viaGrant) {
     return {
       actingAs,
       released: false,
@@ -364,7 +364,7 @@ export default defineEventHandler(async (event) => {
      * diesen Tisch und diese Veranstaltung gilt, weiss nur die Antwort von
      * `/board/grant/live`. Deshalb `ueberFreigabe` und nicht `freigabe`.
      */
-    released: ueberFreigabe,
+    released: viaGrant,
     /*
      * Einer der beiden Wege hat getragen — `match/R` an dieser
      * Veranstaltung oder eine gültige Freigabe für genau diesen Tisch. Ob
@@ -399,7 +399,7 @@ export default defineEventHandler(async (event) => {
            * 15.09.2026, und der Grund ist die Uhr am Tisch.
            *
            * Das Geraet nimmt den Druck auf die Auszeit-Flaeche vorweg und
-           * laesst die Uhr sofort anlaufen (siehe useZaehlwerk.ts). Dafuer
+           * laesst die Uhr sofort anlaufen (siehe useScoring.ts). Dafuer
            * muss es die Dauer kennen, BEVOR eine Auszeit laeuft. Bis
            * hierher kannte es nur `timeoutsAllowed`, und das ist eine
            * ANZAHL und keine Dauer — genau diese Verwechslung war die
@@ -509,7 +509,7 @@ export default defineEventHandler(async (event) => {
            * richtige. Anders als bei den Restkugeln, wo null „noch nichts
            * gezählt" heisst und die Tafel auf ein volles Rack zurückfällt.
            */
-          lauf: { A: rowRec.run_a ?? 0, B: rowRec.run_b ?? 0 },
+          run: { A: rowRec.run_a ?? 0, B: rowRec.run_b ?? 0 },
           high: { A: rowRec.high_a ?? 0, B: rowRec.high_b ?? 0 },
         },
     /*

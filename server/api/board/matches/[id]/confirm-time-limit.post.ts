@@ -26,12 +26,12 @@ export default defineEventHandler(async (event) => {
   const id = parseId(getRouterParam(event, 'id'), 'Partiekennung')
   const body = await readBody<{ shootoutWinner?: string } | null>(event)
 
-  const roh = String(body?.shootoutWinner ?? '').trim().toUpperCase()
-  const sieger = roh === 'A' || roh === 'B' ? roh : undefined
+  const raw = String(body?.shootoutWinner ?? '').trim().toUpperCase()
+  const winner = raw === 'A' || raw === 'B' ? raw : undefined
 
-  return await anDieVerwaltung<{ advanced: number, newlySettled: number }>(
+  return await toAdmin<{ advanced: number, newlySettled: number }>(
     event, `/matches/${id}/confirm-time-limit`, {
       method: 'POST',
-      body: sieger ? { shootoutWinner: sieger } : {},
+      body: winner ? { shootoutWinner: winner } : {},
     })
 })

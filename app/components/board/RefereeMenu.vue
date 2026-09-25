@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Match, MatchEventPublic } from '~~/shared/types/api'
-import type { Seite, Zaehlfehler, Zusatz } from '~/composables/useZaehlwerk'
+import type { Side, ScoringError, Extra } from '~/composables/useScoring'
 
 /**
  * DAS SCHIEDSRICHTER-MENÜ — was am Tisch getan wird und nicht gezählt.
@@ -42,13 +42,13 @@ import type { Seite, Zaehlfehler, Zusatz } from '~/composables/useZaehlwerk'
  * wäre so lange klein. Die Uhr beginnt bei jeder Berührung von vorn.
  */
 const props = defineProps<{
-  partie: Match
-  zusatz: Zusatz | null
+  match: Match
+  extra: Extra | null
   /** Welche Seite der Partie links auf dem Schirm steht — siehe Spiegel. */
-  links: Seite
-  rechts: Seite
+  left: Side
+  right: Side
   /** Wessen Auszeit gerade läuft — beide können. */
-  auszeitLaeuft: { A: boolean, B: boolean }
+  timeoutRunning: { A: boolean, B: boolean }
   /**
    * Welche Zählweise am Tisch gilt — NUR für die Fernbedienungsübersicht.
    *
@@ -56,10 +56,10 @@ const props = defineProps<{
    * Kugeln, die noch liegen), und eine Übersicht, die beide Belegungen
    * nebeneinander zeigte, liesse den Schiedsrichter die falsche lernen.
    */
-  modus: 'RACK_RACE' | 'POINT_RACE' | 'STRAIGHT_POOL'
+  mode: 'RACK_RACE' | 'POINT_RACE' | 'STRAIGHT_POOL'
   /** Eine Eingabe ist unterwegs; die ganze Fläche sperrt sich so lange. */
-  laeuft: boolean
-  fehler: Zaehlfehler | null
+  busy: boolean
+  error: ScoringError | null
   /**
    * Ob an diesem Schirm ein ausgewiesener MENSCH handelt.
    *
@@ -85,7 +85,7 @@ const props = defineProps<{
    * (`CurrentActor.via()` über `/board/grant/live`), und diese Angabe ist
    * seine Antwort — dieselbe, nach der er beim Schreiben selbst entscheidet.
    */
-  alsMensch: boolean
+  asHuman: boolean
   /**
    * WELCHE FASSUNG HIER LÄUFT — die ersten Stellen der Bau-Kennung.
    *
@@ -98,7 +98,7 @@ const props = defineProps<{
    * mit 36 Zeichen, und acht davon unterscheiden am Telefon zuverlässig
    * zwei Bauvorgänge. Wer mehr braucht, liest die Adresszeile.
    */
-  fassung: string
+  version: string
   /**
    * Eine neuere Fassung ist bekannt, und die Tafel wartet nur noch auf den
    * ruhigen Augenblick.
@@ -108,7 +108,7 @@ const props = defineProps<{
    * lädt. Es ist KEINE Aufforderung — niemand soll hier etwas drücken, das
    * Laden geschieht von selbst, sobald die Partie vorbei ist.
    */
-  fassungWartet: boolean
+  versionPending: boolean
   /**
    * DIE ZEITLIMIT-UHR (HEYBALL), so wie die Tafel sie zeigt — Restzeit,
    * Überzug und ob sie GERADE läuft.
@@ -116,22 +116,22 @@ const props = defineProps<{
    * `null` bedeutet: kein Zeitlimit an diesem Turnier, noch kein Anwurf oder
    * die Partie ist schon zu Ende — dieselbe Lesart wie bei den Auszeiten,
    * und aus demselben Grund kommt sie fertig gerechnet von der Tafel
-   * ([eventId]/[table].vue, `zeitlimit`) statt hier ein zweites Mal aus dem
+   * ([eventId]/[table].vue, `timeLimit`) statt hier ein zweites Mal aus dem
    * Abruf gezogen zu werden.
    */
-  zeitlimit: { text: string, ueberzogen: boolean, running: boolean } | null
+  timeLimit: { text: string, overrun: boolean, running: boolean } | null
 }>()
 
 const emit = defineEmits<{
-  schliessen: []
-  tischwechsel: []
-  auszeitZurueck: [seite: Seite, code: string]
-  aufgabe: [seite: Seite, art: 'NO_SHOW' | 'FORFEIT', code: string]
+  close: []
+  tableSwitch: []
+  timeoutBack: [side: Side, code: string]
+  giveUp: [side: Side, kind: 'NO_SHOW' | 'FORFEIT', code: string]
   shotClock: []
   /** Heyball: die Zeitlimit-Uhr von Hand anhalten (false) oder fortsetzen (true). */
-  zeitlimitLaufen: [laufend: boolean]
+  timeLimitRunning: [laufend: boolean]
   /** Heyball: die Partie über das Zeitlimit beenden — Shoot-out-Sieger nur bei Gleichstand. */
-  zeitlimitBeenden: [shootoutWinner?: Seite]
+  timeLimitFinish: [shootoutWinner?: Side]
   /**
    * Ein Satz (Pool) bzw. Frame (Snooker) ist zu Ende, seit dem 25.09.2026.
    *
@@ -139,7 +139,7 @@ const emit = defineEmits<{
    * Stand gegen `setRaceTo` ab. MIT `winner`: Snooker — der Schiedsrichter
    * nennt den Gewinner, weil ein Frame an keiner Zahl endet.
    */
-  satzAbschliessen: [winner?: Seite]
+  setFinish: [winner?: Side]
 }>()
 
 /**
@@ -149,18 +149,18 @@ const emit = defineEmits<{
  * übereinander, und ein Spieler, der unten "Hjalmarström" heisst und hier
  * "L. Hjalmarström", sieht aus wie zwei verschiedene Leute.
  */
-function kurzname(seite: Seite): string {
-  const ganz = (seite === 'A' ? props.partie.sideA : props.partie.sideB).displayName.trim()
-  const teile = ganz.split(/\s+/)
-  return teile[teile.length - 1] ?? ganz
+function shortName(side: Side): string {
+  const full = (side === 'A' ? props.match.sideA : props.match.sideB).displayName.trim()
+  const parts = full.split(/\s+/)
+  return parts[parts.length - 1] ?? full
 }
 
-function langname(seite: Seite): string {
-  return (seite === 'A' ? props.partie.sideA : props.partie.sideB).displayName
+function longName(side: Side): string {
+  return (side === 'A' ? props.match.sideA : props.match.sideB).displayName
 }
 
-function punkte(seite: Seite): number {
-  return (seite === 'A' ? props.partie.sideA : props.partie.sideB).score ?? 0
+function points(side: Side): number {
+  return (side === 'A' ? props.match.sideA : props.match.sideB).score ?? 0
 }
 
 /* ------------------------------------------------------------------------
@@ -216,10 +216,10 @@ function punkte(seite: Seite): number {
  * --------------------------------------------------------------------- */
 
 /** Die angeordnete Shot-Clock, oder null. Zwei Zeitpunkte — es läuft keine Uhr. */
-const shotClock = computed(() => props.zusatz?.shotClock ?? null)
+const shotClock = computed(() => props.extra?.shotClock ?? null)
 
 /** Sie ist angeordnet und noch nicht zur Kenntnis genommen — die Partie steht. */
-const shotClockOffen = computed(() =>
+const shotClockPending = computed(() =>
   shotClock.value !== null && shotClock.value.acknowledgedAt === null)
 
 /**
@@ -232,16 +232,16 @@ const shotClockOffen = computed(() =>
  * die Anordnung für falsch hält, spricht mit der Turnierleitung; nur sie
  * kann aufheben.
  */
-function shotClockFragen() {
-  fragen({
-    frage: 'Shot clock for this match',
-    erklaerung: 'The tournament leadership has ordered the shot clock. '
+function shotClockAsk() {
+  ask({
+    question: 'Shot clock for this match',
+    explanation: 'The tournament leadership has ordered the shot clock. '
       + 'Acknowledge that you have seen it — then the score goes on again. '
       + 'You keep the clock yourself at the table; nothing runs here.',
-    wort: 'I have seen it',
+    word: 'I have seen it',
     // KEIN Code — siehe die Begründung über diesem Abschnitt.
     code: false,
-    tun: () => emit('shotClock'),
+    act: () => emit('shotClock'),
   })
 }
 
@@ -275,11 +275,11 @@ function shotClockFragen() {
  * ausgewiesen ist, sieht die Frage ohne Ziffernfeld und ist mit einer
  * Berührung durch.
  * --------------------------------------------------------------------- */
-interface Rueckfrage {
-  frage: string
-  erklaerung: string
+interface Confirmation {
+  question: string
+  explanation: string
   /** Was auf dem bestätigenden Knopf steht — nie „OK". */
-  wort: string
+  word: string
   /**
    * Verlangt sechs Ziffern, die einem MENSCHEN gehören.
    *
@@ -300,7 +300,7 @@ interface Rueckfrage {
    * ist das einzige Stück dieses Menüs, das wirklich nichts TUT.
    */
   code?: boolean
-  tun: (code: string) => void
+  act: (code: string) => void
 }
 
 /*
@@ -308,20 +308,20 @@ interface Rueckfrage {
  * schickt.
  *
  * Die Karte und der Nachweis des Personencodes gehen nicht durch
- * `useZaehlwerk`; sie sind kein Stand, haben keinen Vorgriff und nichts
+ * `useScoring`; sie sind kein Stand, haben keinen Vorgriff und nichts
  * zurückzudrehen. Bis zum 16.09.2026 endeten beide in einem `catch`, das
  * bloss `kartenFehler` setzte — und diese Angabe wurde von keiner Zeile der
  * Vorlage gelesen. EINE FALSCHE PIN BEI EINER VERWARNUNG WAR DAMIT AM TISCH
  * NICHT ZU SEHEN: es passierte einfach nichts, und der Schiedsrichter tippte
  * noch einmal.
  *
- * `useAbweisung` ist dieselbe Uhr wie unten in der Leiste (fünfzehn
+ * `useRejection` ist dieselbe Uhr wie unten in der Leiste (fünfzehn
  * Sekunden, dann geht die Zeile von selbst) und derselbe Satzkatalog
  * (`BOARD_PIN_REJECTED` → "That code was not accepted. Nothing was
  * changed."). Zwei Uhren mit zwei Fristen wären zwei Antworten auf dieselbe
  * Frage.
  */
-const eigen = useAbweisung()
+const own = useRejection()
 
 /**
  * Was oben rot steht: die eigene Abweisung zuerst.
@@ -330,9 +330,9 @@ const eigen = useAbweisung()
  * Antwort auf DIESEN Druck lesen und nicht eine Auszeit-Meldung von vorhin,
  * die noch ihre Frist absitzt.
  */
-const roteZeile = computed(() => eigen.fehler.value ?? props.fehler)
+const redLine = computed(() => own.error.value ?? props.error)
 
-const rueckfrage = ref<Rueckfrage | null>(null)
+const confirmation = ref<Confirmation | null>(null)
 
 /**
  * Die eingetippten Ziffern — nur solange die Frage offen ist.
@@ -342,7 +342,7 @@ const rueckfrage = ref<Rueckfrage | null>(null)
  * stehen bleibt, wird beim nächsten Mal mitgeschickt, ohne dass ihn jemand
  * eingetippt hat.
  */
-const codeZiffern = ref('')
+const codeDigits = ref('')
 
 /**
  * Das Codefeld bekommt den Fokus, sobald die Abfrage aufgeht.
@@ -360,24 +360,24 @@ const codeZiffern = ref('')
  * ohnehin am Geraet und will tippen. Ihn dann erst auf ein Feld zielen zu
  * lassen, kostet den Griff, den die Tastatur sparen sollte.
  *
- * `nextTick`, weil das Feld erst mit `rueckfrage.code` entsteht: ein
+ * `nextTick`, weil das Feld erst mit `confirmation.code` entsteht: ein
  * `focus()` im selben Durchgang traefe ein Element, das es noch nicht gibt.
  */
-const codeFeld = ref<HTMLInputElement | null>(null)
+const codeField = ref<HTMLInputElement | null>(null)
 
-watch(() => rueckfrage.value?.code === true, async (fragtNachCode) => {
-  if (!fragtNachCode) return
+watch(() => confirmation.value?.code === true, async (asksForCode) => {
+  if (!asksForCode) return
   await nextTick()
-  codeFeld.value?.focus()
+  codeField.value?.focus()
 })
 
-const codeVollstaendig = computed(() => /^[0-9]{6}$/.test(codeZiffern.value))
+const codeComplete = computed(() => /^[0-9]{6}$/.test(codeDigits.value))
 
 /**
  * Die zuletzt bestätigte Frage — der Rückweg, wenn der Server einen Code
  * verlangt.
  *
- * Sie überlebt das Schliessen mit Absicht: `jaSagen` macht die Frage zu,
+ * Sie überlebt das Schliessen mit Absicht: `confirmYes` macht die Frage zu,
  * BEVOR sie ausgeführt wird, und die Antwort des Servers kommt erst danach.
  * Ohne diese Kopie wäre in dem Augenblick, in dem „Code nötig" hereinkommt,
  * nichts mehr da, was man wieder aufschlagen könnte.
@@ -387,25 +387,25 @@ const codeVollstaendig = computed(() => /^[0-9]{6}$/.test(codeZiffern.value))
  * wiederkommt, schickte ihn beim nächsten Druck mit, ohne dass ihn jemand
  * eingetippt hat.
  */
-const letzteFrage = ref<Rueckfrage | null>(null)
+const lastConfirmation = ref<Confirmation | null>(null)
 
-function fragen(f: Rueckfrage) {
-  codeZiffern.value = ''
-  rueckfrage.value = f
+function ask(f: Confirmation) {
+  codeDigits.value = ''
+  confirmation.value = f
 }
 
-function frageSchliessen() {
-  codeZiffern.value = ''
-  rueckfrage.value = null
+function closeConfirmation() {
+  codeDigits.value = ''
+  confirmation.value = null
 }
 
-function jaSagen() {
-  const f = rueckfrage.value
-  if (f?.code && !codeVollstaendig.value) return
-  const ziffern = codeZiffern.value
-  frageSchliessen()
-  letzteFrage.value = f ?? null
-  f?.tun(ziffern)
+function confirmYes() {
+  const f = confirmation.value
+  if (f?.code && !codeComplete.value) return
+  const digits = codeDigits.value
+  closeConfirmation()
+  lastConfirmation.value = f ?? null
+  f?.act(digits)
 }
 
 /* ------------------------------------------------------------------------
@@ -415,7 +415,7 @@ function jaSagen() {
  * auch an den Aufrufstellen. Sie war bis zum 16.09.2026 die einzige
  * Entscheidung darüber, ob das Ziffernfeld erscheint, und sie geht in einem
  * Fall daneben, der am Tisch alles andere als selten ist: jemand ist am
- * Gerät ANGEMELDET (`alsMensch` ist wahr, das Feld bleibt weg), trägt aber
+ * Gerät ANGEMELDET (`asHuman` ist wahr, das Feld bleibt weg), trägt aber
  * an dieser Veranstaltung kein Recht. Bis heute endete das in einer 403 und
  * der Satz darunter log — „This account may not score at this event" — und
  * der Schiedsrichter stand mit seinen sechs Ziffern daneben, ohne dass ihn
@@ -428,7 +428,7 @@ function jaSagen() {
  * — er sieht seinen eigenen Satz („Kudlik did not show up?") noch einmal und
  * ergänzt, was fehlte.
  *
- * VERWORFEN: vor JEDER Tat nach dem Code zu fragen und `alsMensch` ganz
+ * VERWORFEN: vor JEDER Tat nach dem Code zu fragen und `asHuman` ganz
  * fallen zu lassen. Dann tippte die Turnierleitung, die ihr Recht trägt,
  * sechs Ziffern für etwas, das sie ohne sie darf — und zwar jedes Mal.
  *
@@ -436,13 +436,13 @@ function jaSagen() {
  * Umlauf mehr beim Aufschlagen des Menüs, für eine Auskunft, die genau dann
  * gebraucht wird, wenn sie ohnehin schon unterwegs ist.
  * --------------------------------------------------------------------- */
-watch(() => roteZeile.value?.schluessel, (schluessel) => {
-  if (schluessel !== 'BOARD_PIN_REQUIRED') return
-  const f = letzteFrage.value
+watch(() => redLine.value?.errorCode, (errorCode) => {
+  if (errorCode !== 'BOARD_PIN_REQUIRED') return
+  const f = lastConfirmation.value
   // Nur, wenn gerade nichts offen ist: eine Frage, die dem Schiedsrichter
   // unter der Hand ausgetauscht wird, ist schlimmer als gar keine.
-  if (!f || rueckfrage.value) return
-  fragen({ ...f, code: true })
+  if (!f || confirmation.value) return
+  ask({ ...f, code: true })
 })
 
 /* ------------------------------------------------------------------------
@@ -479,14 +479,14 @@ watch(() => roteZeile.value?.schluessel, (schluessel) => {
  * FINDBAR. Bis hierher war sie ein Nebeneffekt der Auszeit-Fläche ("nochmal
  * tippen, dann ist sie weg"), und niemand, der sie brauchte, wusste das.
  */
-function auszeitPunkt(seite: Seite) {
-  const laeuftJetzt = props.auszeitLaeuft[seite]
-  const genommen = props.zusatz?.timeoutsTaken?.[seite] ?? 0
+function timeoutEntry(side: Side) {
+  const runningNow = props.timeoutRunning[side]
+  const taken = props.extra?.timeoutsTaken?.[side] ?? 0
   return {
-    moeglich: laeuftJetzt,
-    hinweis: laeuftJetzt
+    possible: runningNow,
+    hint: runningNow
       ? 'gives the time-out back to the player'
-      : genommen === 0
+      : taken === 0
         ? 'no time-out taken'
         : 'only while it is running',
   }
@@ -501,16 +501,16 @@ function auszeitPunkt(seite: Seite) {
  * konnte am Bildschirm nicht sehen, dass ihm das Guthaben durch die Lappen
  * ging.
  */
-function auszeitZurueckFragen(seite: Seite) {
-  fragen({
-    frage: `Take back ${kurzname(seite)}'s time-out?`,
-    erklaerung: `The clock stops and ${langname(seite)} gets the time-out `
+function timeoutBackAsk(side: Side) {
+  ask({
+    question: `Take back ${shortName(side)}'s time-out?`,
+    explanation: `The clock stops and ${longName(side)} gets the time-out `
       + 'back — it will not count as taken. Use this when the wrong side got it.',
-    wort: 'Take it back',
+    word: 'Take it back',
     // Dieselbe Regel wie bei der Aufgabe: nur am freigeschalteten Gerät.
     // Wer über eine tragende Sitzung handelt, hat sich ausgewiesen.
-    code: !props.alsMensch,
-    tun: (code: string) => emit('auszeitZurueck', seite, code),
+    code: !props.asHuman,
+    act: (code: string) => emit('timeoutBack', side, code),
   })
 }
 
@@ -562,7 +562,7 @@ function auszeitZurueckFragen(seite: Seite) {
  * Spielgeschehen, `STARTED` belegt nur den vergebenen Anstoss). Das wäre die
  * genauere Auskunft und ist hier trotzdem das schlechtere Mass: der Verlauf
  * wird beim Öffnen des Menüs erst geholt, er kann noch unterwegs sein und er
- * kann ausbleiben (`verlaufFehler`). Eine Beschriftung, die eine Sekunde
+ * kann ausbleiben (`historyError`). Eine Beschriftung, die eine Sekunde
  * nach dem Aufschlagen von „did not show up" auf „gives up" umspringt oder
  * bei schlechtem WLAN etwas anderes sagt als bei gutem, ist genau die Falle,
  * die dieser Absatz verhindern soll. Der Stand liegt immer vor und ändert
@@ -577,36 +577,36 @@ function auszeitZurueckFragen(seite: Seite) {
  * in der anderen Richtung — ein echtes Nichterscheinen als Aufgabe mit
  * „0–0" — steht dagegen in jeder Ergebnisliste und ist der gemeldete.
  */
-const angefangen = computed(() =>
-  (props.partie.sideA.score ?? 0) > 0
-  || (props.partie.sideB.score ?? 0) > 0)
+const started = computed(() =>
+  (props.match.sideA.score ?? 0) > 0
+  || (props.match.sideB.score ?? 0) > 0)
 
-const aufgabeArt = computed<'NO_SHOW' | 'FORFEIT'>(() =>
-  angefangen.value ? 'FORFEIT' : 'NO_SHOW')
+const retireKind = computed<'NO_SHOW' | 'FORFEIT'>(() =>
+  started.value ? 'FORFEIT' : 'NO_SHOW')
 
-function aufgabeWort(seite: Seite): string {
-  return aufgabeArt.value === 'NO_SHOW'
-    ? `${kurzname(seite)} did not show up`
-    : `${kurzname(seite)} gives up`
+function retireWord(side: Side): string {
+  return retireKind.value === 'NO_SHOW'
+    ? `${shortName(side)} did not show up`
+    : `${shortName(side)} gives up`
 }
 
-function aufgabeHinweis(seite: Seite): string {
-  const gegner = seite === props.links ? props.rechts : props.links
-  return aufgabeArt.value === 'NO_SHOW'
-    ? `${kurzname(gegner)} walks over · no score`
-    : `${kurzname(gegner)} wins ${punkte(gegner)}–${punkte(seite)}`
+function retireHint(side: Side): string {
+  const opponent = side === props.left ? props.right : props.left
+  return retireKind.value === 'NO_SHOW'
+    ? `${shortName(opponent)} walks over · no score`
+    : `${shortName(opponent)} wins ${points(opponent)}–${points(side)}`
 }
 
-function aufgabeFragen(seite: Seite) {
-  const gegner = seite === props.links ? props.rechts : props.links
-  fragen({
-    frage: aufgabeWort(seite) + '?',
-    erklaerung: aufgabeArt.value === 'NO_SHOW'
-      ? `${langname(gegner)} takes the match without playing. `
+function retireAsk(side: Side) {
+  const opponent = side === props.left ? props.right : props.left
+  ask({
+    question: retireWord(side) + '?',
+    explanation: retireKind.value === 'NO_SHOW'
+      ? `${longName(opponent)} takes the match without playing. `
         + 'This ends the match and moves the bracket on.'
-      : `${langname(gegner)} wins ${punkte(gegner)}–${punkte(seite)}. `
+      : `${longName(opponent)} wins ${points(opponent)}–${points(side)}. `
         + 'This ends the match and moves the bracket on.',
-    wort: aufgabeArt.value === 'NO_SHOW' ? 'No show' : 'Give up',
+    word: retireKind.value === 'NO_SHOW' ? 'No show' : 'Give up',
     /*
      * Nur am freigeschalteten Gerät. Wer ANGEMELDET ist, hat sich schon
      * ausgewiesen — ihn ein zweites Mal danach zu fragen wäre eine Hürde
@@ -614,8 +614,8 @@ function aufgabeFragen(seite: Seite) {
      * hier steht. Geprüft wird es ohnehin am Server; dies ist nur die
      * Frage, ob das Feld erscheint.
      */
-    code: !props.alsMensch,
-    tun: (code: string) => emit('aufgabe', seite, aufgabeArt.value, code),
+    code: !props.asHuman,
+    act: (code: string) => emit('giveUp', side, retireKind.value, code),
   })
 }
 
@@ -650,9 +650,9 @@ function aufgabeFragen(seite: Seite) {
  * --------------------------------------------------------------------- */
 
 /** Der Stand, den DIESES Menü sieht — derselbe wie oben in der Kopfzeile. */
-const zeitlimitUnentschieden = computed(() => punkte('A') === punkte('B'))
+const timeLimitTied = computed(() => points('A') === points('B'))
 
-const zeitlimitFuehrend = computed<Seite>(() => (punkte('A') >= punkte('B') ? 'A' : 'B'))
+const timeLimitLeader = computed<Side>(() => (points('A') >= points('B') ? 'A' : 'B'))
 
 /**
  * Anhalten oder fortsetzen — OHNE RÜCKFRAGE.
@@ -663,8 +663,8 @@ const zeitlimitFuehrend = computed<Seite>(() => (punkte('A') >= punkte('B') ? 'A
  * Schiedsrichter am wenigsten braucht — er soll die Uhr in der Zeit
  * fortsetzen, die der Gegner braucht, um an den Tisch zurückzukommen.
  */
-function zeitlimitLaufenSchalten() {
-  emit('zeitlimitLaufen', !(props.zeitlimit?.running ?? false))
+function timeLimitToggleRunning() {
+  emit('timeLimitRunning', !(props.timeLimit?.running ?? false))
 }
 
 /**
@@ -672,21 +672,21 @@ function zeitlimitLaufenSchalten() {
  * die führende Seite von selbst.
  *
  * OHNE SHOOT-OUT-SIEGER IM AUFRUF, aus demselben Grund wie bei
- * `aufgabeFragen`: was diese Fläche nicht anbietet, muss der Server nicht
+ * `retireAsk`: was diese Fläche nicht anbietet, muss der Server nicht
  * abweisen. Steht es doch gleich — die Tafel und die Datenbank könnten
  * durch eine verspätete Satzwertung kurz auseinanderlaufen —, sagt
  * `SHOOTOUT_WINNER_REQUIRED` das, und die rote Zeile erklärt, was zu tun
  * ist.
  */
-function zeitlimitBeendenFragen() {
-  const sieger = zeitlimitFuehrend.value
-  fragen({
-    frage: 'Time limit reached — finish the match?',
-    erklaerung: `${langname(sieger)} leads ${punkte(sieger)}–${punkte(sieger === 'A' ? 'B' : 'A')} `
+function timeLimitFinishAsk() {
+  const winner = timeLimitLeader.value
+  ask({
+    question: 'Time limit reached — finish the match?',
+    explanation: `${longName(winner)} leads ${points(winner)}–${points(winner === 'A' ? 'B' : 'A')} `
       + 'and wins on the clock. This ends the match and moves the bracket on.',
-    wort: 'Finish',
+    word: 'Finish',
     code: false,
-    tun: () => emit('zeitlimitBeenden'),
+    act: () => emit('timeLimitFinish'),
   })
 }
 
@@ -701,14 +701,14 @@ function zeitlimitBeendenFragen() {
  * darüber kein Feld, denn der Shoot-out selbst läuft nicht über
  * `match_slot.score` (siehe `competition.confirm_match_time_limit`).
  */
-function zeitlimitShootoutFragen(seite: Seite) {
-  fragen({
-    frage: `${kurzname(seite)} wins the shoot-out?`,
-    erklaerung: `The time limit found the match tied at ${punkte('A')}–${punkte('B')}. `
-      + `${langname(seite)} wins the shoot-out and the match — this moves the bracket on.`,
-    wort: 'Finish',
+function timeLimitShootoutAsk(side: Side) {
+  ask({
+    question: `${shortName(side)} wins the shoot-out?`,
+    explanation: `The time limit found the match tied at ${points('A')}–${points('B')}. `
+      + `${longName(side)} wins the shoot-out and the match — this moves the bracket on.`,
+    word: 'Finish',
     code: false,
-    tun: () => emit('zeitlimitBeenden', seite),
+    act: () => emit('timeLimitFinish', side),
   })
 }
 
@@ -744,32 +744,32 @@ function zeitlimitShootoutFragen(seite: Seite) {
  * kein Ergebnis, das ein Unbefugter sich selbst schreiben könnte, wie es
  * bei Aufgabe und Nichtantreten der Fall wäre.
  */
-const satzModus = computed<'POOL' | 'SNOOKER' | null>(() => {
-  if (props.partie.discipline.scoringKind === 'FRAME_RACE') return 'SNOOKER'
-  if (props.partie.setRaceTo !== null) return 'POOL'
+const setMode = computed<'POOL' | 'SNOOKER' | null>(() => {
+  if (props.match.discipline.scoringKind === 'FRAME_RACE') return 'SNOOKER'
+  if (props.match.setRaceTo !== null) return 'POOL'
   return null
 })
 
 /** Pool: hat eine Seite die Distanz DIESES Satzes erreicht? */
-const satzErreicht = computed(() => {
-  const distanz = props.partie.setRaceTo ?? 0
-  if (distanz <= 0) return false
-  return (props.partie.sideA.setScore ?? 0) >= distanz
-    || (props.partie.sideB.setScore ?? 0) >= distanz
+const setReached = computed(() => {
+  const distance = props.match.setRaceTo ?? 0
+  if (distance <= 0) return false
+  return (props.match.sideA.setScore ?? 0) >= distance
+    || (props.match.sideB.setScore ?? 0) >= distance
 })
 
-function satzFragen(winner?: Seite) {
-  const istSnooker = satzModus.value === 'SNOOKER'
-  fragen({
-    frage: istSnooker ? `Confirm frame — ${kurzname(winner!)} wins?` : 'Confirm this set?',
-    erklaerung: istSnooker
-      ? `${langname(winner!)} takes this frame. The next frame starts at 0:0.`
+function setAsk(winner?: Side) {
+  const isSnooker = setMode.value === 'SNOOKER'
+  ask({
+    question: isSnooker ? `Confirm frame — ${shortName(winner!)} wins?` : 'Confirm this set?',
+    explanation: isSnooker
+      ? `${longName(winner!)} takes this frame. The next frame starts at 0:0.`
       : 'The set race has been reached. The winner is taken from the score '
         + 'shown on the board — the next set starts at 0:0.',
-    wort: istSnooker ? 'Confirm frame' : 'Confirm set',
+    word: isSnooker ? 'Confirm frame' : 'Confirm set',
     // Kein Code — siehe die Begründung über diesem Abschnitt.
     code: false,
-    tun: () => emit('satzAbschliessen', winner),
+    act: () => emit('setFinish', winner),
   })
 }
 
@@ -796,32 +796,32 @@ function satzFragen(winner?: Seite) {
  * Tisch und nicht die des Zifferblocks — gesucht wird hier nach dem Vorgang
  * und nicht nach der Taste.
  */
-const belegung = computed<{ taste: string, was: string }[]>(() => {
-  if (props.modus === 'STRAIGHT_POOL') {
+const layout = computed<{ key: string, action: string }[]>(() => {
+  if (props.mode === 'STRAIGHT_POOL') {
     return [
-      { taste: '2 … 9', was: 'Balls left after the miss' },
-      { taste: '1 then 0 … 5', was: 'Balls left: 10 … 15' },
-      { taste: '1 then ⏎', was: 'Balls left: 1 — only while 10 or more are up' },
-      { taste: '+', was: 'Rack · break ball left' },
-      { taste: '−', was: 'Safety' },
-      { taste: '.', was: 'Foul' },
-      { taste: '*', was: 'Undo the last entry' },
-      { taste: '/', was: 'More — and cancels anything half typed' },
-      { taste: '/ 1', was: 'Rack · 15th down' },
-      { taste: '/ 2', was: 'Break foul · again' },
-      { taste: '/ 3', was: 'Break foul · accept' },
-      { taste: '/ 4', was: `Time out ${kurzname('A')}` },
-      { taste: '/ 5', was: 'Switch the table — or finish the match' },
-      { taste: '/ 6', was: `Time out ${kurzname('B')}` },
-      { taste: '1 · 3', was: 'Before the break only: who breaks first' },
-      { taste: 'R', was: 'Acknowledge the shot clock' },
-      { taste: '0 0', was: 'This menu · 0 closes it' },
+      { key: '2 … 9', action: 'Balls left after the miss' },
+      { key: '1 then 0 … 5', action: 'Balls left: 10 … 15' },
+      { key: '1 then ⏎', action: 'Balls left: 1 — only while 10 or more are up' },
+      { key: '+', action: 'Rack · break ball left' },
+      { key: '−', action: 'Safety' },
+      { key: '.', action: 'Foul' },
+      { key: '*', action: 'Undo the last entry' },
+      { key: '/', action: 'More — and cancels anything half typed' },
+      { key: '/ 1', action: 'Rack · 15th down' },
+      { key: '/ 2', action: 'Break foul · again' },
+      { key: '/ 3', action: 'Break foul · accept' },
+      { key: '/ 4', action: `Time out ${shortName('A')}` },
+      { key: '/ 5', action: 'Switch the table — or finish the match' },
+      { key: '/ 6', action: `Time out ${shortName('B')}` },
+      { key: '1 · 3', action: 'Before the break only: who breaks first' },
+      { key: 'R', action: 'Acknowledge the shot clock' },
+      { key: '0 0', action: 'This menu · 0 closes it' },
     ]
   }
-  const punkt = props.modus === 'POINT_RACE'
+  const pointRace = props.mode === 'POINT_RACE'
   return [
-    { taste: '7 · 9', was: punkt ? `One point for ${kurzname('A')} · ${kurzname('B')}` : `One rack for ${kurzname('A')} · ${kurzname('B')}` },
-    { taste: '1 · 3', was: punkt ? 'Take one point back' : 'Take one rack back' },
+    { key: '7 · 9', action: pointRace ? `One point for ${shortName('A')} · ${shortName('B')}` : `One rack for ${shortName('A')} · ${shortName('B')}` },
+    { key: '1 · 3', action: pointRace ? 'Take one point back' : 'Take one rack back' },
     /*
      * + UND − STEHEN NUR IN DER PUNKTFASSUNG — UND SEIT DEM 16.09.2026
      * STIMMT DAS AUCH.
@@ -834,16 +834,16 @@ const belegung = computed<{ taste: string, was: string }[]>(() => {
      * Aufgelöst wurde es auf der Seite der Tafel und nicht auf der dieser
      * Liste: der Zifferblock ist in der Satzwertung geschlossen worden
      * (`case '+'` in board/[eventId]/[table].vue, zweite Sperre in
-     * `blockOeffnen` in Zaehlleiste.vue). Diese Zeile bleibt deshalb, wie
+     * `blockOpen` in ScoreBar.vue). Diese Zeile bleibt deshalb, wie
      * sie war — sie war die richtige Hälfte.
      */
-    ...(punkt ? [{ taste: '+ · −', was: 'A whole run — type it in' }] : []),
-    { taste: '4 · 6', was: `Time out ${kurzname('A')} · ${kurzname('B')}` },
-    { taste: '5', was: punkt ? 'End of turn — or finish the match' : 'Finish the match' },
-    { taste: '*', was: 'Undo the last entry' },
-    { taste: '1 · 3', was: 'Before the break only: who breaks first' },
-    { taste: 'R', was: 'Acknowledge the shot clock' },
-    { taste: '0 0', was: 'This menu · 0 closes it' },
+    ...(pointRace ? [{ key: '+ · −', action: 'A whole run — type it in' }] : []),
+    { key: '4 · 6', action: `Time out ${shortName('A')} · ${shortName('B')}` },
+    { key: '5', action: pointRace ? 'End of turn — or finish the match' : 'Finish the match' },
+    { key: '*', action: 'Undo the last entry' },
+    { key: '1 · 3', action: 'Before the break only: who breaks first' },
+    { key: 'R', action: 'Acknowledge the shot clock' },
+    { key: '0 0', action: 'This menu · 0 closes it' },
   ]
 })
 
@@ -869,10 +869,10 @@ const belegung = computed<{ taste: string, was: string }[]>(() => {
  * erscheint hier ein Satz und kein Knopf: entschieden wird das nicht am
  * Tisch.
  */
-interface Kartenanlass {
+interface CardReason {
   code: string
   text: string
-  karte: 'GREEN' | 'YELLOW' | 'RED'
+  card: 'GREEN' | 'YELLOW' | 'RED'
 }
 
 /**
@@ -910,58 +910,58 @@ interface Kartenanlass {
  * passt, aber nicht umgedeutet — dieselben fünfzehn Zeilen, die auch in
  * `V2__die_stammdaten.sql` stehen.
  */
-const NOTFALLLISTE: Kartenanlass[] = [
-  { code: 'TIMEOUT_NOT_ANNOUNCED', text: 'Time-out without telling the referee', karte: 'GREEN' },
-  { code: 'DEVICE_VISIBLE', text: 'Phone or device visible', karte: 'GREEN' },
-  { code: 'RACK_INSPECTED', text: 'Inspecting or touching the rack', karte: 'GREEN' },
-  { code: 'EQUIPMENT_MISUSE', text: 'Misuse of equipment', karte: 'GREEN' },
-  { code: 'PATTERN_RACKING', text: 'Pattern racking', karte: 'GREEN' },
-  { code: 'TIMEOUT_LATE', text: 'Late back from the time-out', karte: 'YELLOW' },
-  { code: 'TIMEOUT_PRACTICE', text: 'Practising during the time-out', karte: 'YELLOW' },
-  { code: 'RACK_TOUCHED', text: 'Touching the rack that was racked', karte: 'YELLOW' },
-  { code: 'DEVICE_USED', text: 'Using a phone, or it rings or vibrates', karte: 'YELLOW' },
-  { code: 'SMOKING', text: 'Smoking, snus, snuff or e-cigarette', karte: 'YELLOW' },
-  { code: 'TAPPING', text: 'Tapping the table or the balls', karte: 'YELLOW' },
-  { code: 'UNSPORTSMANLIKE', text: 'Unsportsmanlike conduct (serious)', karte: 'YELLOW' },
-  { code: 'EQUIPMENT_DAMAGE', text: 'Damaging equipment', karte: 'RED' },
-  { code: 'UNSPORTSMANLIKE_SEVERE', text: 'Unsportsmanlike conduct (very serious)', karte: 'RED' },
-  { code: 'ALCOHOL', text: 'Drinking alcohol during the match', karte: 'RED' },
+const FALLBACK_REASONS: CardReason[] = [
+  { code: 'TIMEOUT_NOT_ANNOUNCED', text: 'Time-out without telling the referee', card: 'GREEN' },
+  { code: 'DEVICE_VISIBLE', text: 'Phone or device visible', card: 'GREEN' },
+  { code: 'RACK_INSPECTED', text: 'Inspecting or touching the rack', card: 'GREEN' },
+  { code: 'EQUIPMENT_MISUSE', text: 'Misuse of equipment', card: 'GREEN' },
+  { code: 'PATTERN_RACKING', text: 'Pattern racking', card: 'GREEN' },
+  { code: 'TIMEOUT_LATE', text: 'Late back from the time-out', card: 'YELLOW' },
+  { code: 'TIMEOUT_PRACTICE', text: 'Practising during the time-out', card: 'YELLOW' },
+  { code: 'RACK_TOUCHED', text: 'Touching the rack that action racked', card: 'YELLOW' },
+  { code: 'DEVICE_USED', text: 'Using a phone, or it rings or vibrates', card: 'YELLOW' },
+  { code: 'SMOKING', text: 'Smoking, snus, snuff or e-cigarette', card: 'YELLOW' },
+  { code: 'TAPPING', text: 'Tapping the table or the balls', card: 'YELLOW' },
+  { code: 'UNSPORTSMANLIKE', text: 'Unsportsmanlike conduct (serious)', card: 'YELLOW' },
+  { code: 'EQUIPMENT_DAMAGE', text: 'Damaging equipment', card: 'RED' },
+  { code: 'UNSPORTSMANLIKE_SEVERE', text: 'Unsportsmanlike conduct (very serious)', card: 'RED' },
+  { code: 'ALCOHOL', text: 'Drinking alcohol during the match', card: 'RED' },
 ]
 
-interface Kartenstand {
-  side: Seite
+interface CardStanding {
+  side: Side
   playerId: string
   displayName: string
   standing: 'NONE' | 'GREEN' | 'YELLOW' | 'RED' | 'BLACK'
 }
 
-const staende = ref<Kartenstand[] | null>(null)
+const standings = ref<CardStanding[] | null>(null)
 
 /**
  * Der Katalog, wie der Server ihn geschickt hat — `null`, solange noch keine
  * Antwort da war.
  */
-const anlaesseVomServer = ref<Kartenanlass[] | null>(null)
+const reasonsFromServer = ref<CardReason[] | null>(null)
 
 /**
  * Was am Tisch aufklappt. Der Katalog des Verbandes, und wenn er leer
- * ankommt, die eingebaute Liste — siehe den Kommentar an `NOTFALLLISTE`.
+ * ankommt, die eingebaute Liste — siehe den Kommentar an `FALLBACK_REASONS`.
  */
-const anlaesse = computed<Kartenanlass[]>(() => {
-  const vomServer = anlaesseVomServer.value
-  return vomServer && vomServer.length > 0 ? vomServer : NOTFALLLISTE
+const reasons = computed<CardReason[]>(() => {
+  const fromServer = reasonsFromServer.value
+  return fromServer && fromServer.length > 0 ? fromServer : FALLBACK_REASONS
 })
 /** Für wen gerade die Anlassliste offensteht — `null`, wenn keine. */
-const anlassFuer = ref<Kartenstand | null>(null)
+const reasonOpenFor = ref<CardStanding | null>(null)
 
-async function staendeHolen() {
+async function fetchStandings() {
   try {
-    const roh = await $fetch<{ sides: Kartenstand[], reasons: Kartenanlass[] }>(
-      `/api/board/matches/${props.partie.id}/cards`,
+    const raw = await $fetch<{ sides: CardStanding[], reasons: CardReason[] }>(
+      `/api/board/matches/${props.match.id}/cards`,
       { headers: { 'cache-control': 'no-cache' } },
     )
-    staende.value = roh?.sides ?? []
-    anlaesseVomServer.value = roh?.reasons ?? []
+    standings.value = raw?.sides ?? []
+    reasonsFromServer.value = raw?.reasons ?? []
   }
   catch {
     /*
@@ -974,22 +974,22 @@ async function staendeHolen() {
      * Abrufer, der im Hintergrund stolpert, hat niemandes Druck
      * beantwortet.
      */
-    staende.value = null
+    standings.value = null
     /*
      * Der Katalog bleibt auf `null` und NICHT auf leer: leer hiesse "der
      * Server sagt, es gibt keine", null heisst "wir wissen es nicht". Beim
      * nächsten gelungenen Abruf steht wieder, was gilt. Auf die Auswahl wirkt
      * es ohnehin nicht — ohne Stand gibt es keinen Knopf, der sie öffnet.
      */
-    anlaesseVomServer.value = null
+    reasonsFromServer.value = null
   }
 }
 
-onMounted(staendeHolen)
+onMounted(fetchStandings)
 
 /** Die Menschen einer Seite — beim Doppel sind es zwei. */
-function staendeDer(seite: Seite): Kartenstand[] {
-  return (staende.value ?? []).filter(z => z.side === seite)
+function standingsFor(side: Side): CardStanding[] {
+  return (standings.value ?? []).filter(z => z.side === side)
 }
 
 /**
@@ -998,8 +998,8 @@ function staendeDer(seite: Seite): Kartenstand[] {
  * "Clean" und nicht "None": am Tisch wird gefragt, ob jemand etwas hat, und
  * die Antwort darauf heisst "nein" und nicht "der Wert ist leer".
  */
-function standWort(stand: Kartenstand['standing']): string {
-  switch (stand) {
+function standingWord(standing: CardStanding['standing']): string {
+  switch (standing) {
     case 'GREEN': return 'Green'
     case 'YELLOW': return 'Yellow'
     case 'RED': return 'Red'
@@ -1008,8 +1008,8 @@ function standWort(stand: Kartenstand['standing']): string {
   }
 }
 
-function anlassOeffnen(wer: Kartenstand) {
-  anlassFuer.value = anlassFuer.value?.playerId === wer.playerId ? null : wer
+function reasonToggle(person: CardStanding) {
+  reasonOpenFor.value = reasonOpenFor.value?.playerId === person.playerId ? null : person
 }
 
 /**
@@ -1022,59 +1022,59 @@ function anlassOeffnen(wer: Kartenstand) {
  * Datenbank — sie rechnet es gleich noch einmal und überschreibt, was hier
  * stünde.
  */
-const LEITER = ['NONE', 'GREEN', 'YELLOW', 'RED', 'BLACK']
+const LADDER = ['NONE', 'GREEN', 'YELLOW', 'RED', 'BLACK']
 
-function standDanach(vorher: string, karte: string): string {
-  const i = Math.min(Math.max(LEITER.indexOf(vorher) + 1, LEITER.indexOf(karte)), 4)
-  return LEITER[i] ?? 'NONE'
+function standingAfter(before: string, card: string): string {
+  const i = Math.min(Math.max(LADDER.indexOf(before) + 1, LADDER.indexOf(card)), 4)
+  return LADDER[i] ?? 'NONE'
 }
 
-function folgeText(wer: Kartenstand, anlass: Kartenanlass): string {
-  const neu = standDanach(wer.standing, anlass.karte)
-  const gegner = wer.side === props.links ? props.rechts : props.links
-  if (neu === 'YELLOW') return `${kurzname(gegner)} gets a rack`
-  if (neu === 'RED') return `${kurzname(wer.side)} loses the match`
-  if (neu === 'BLACK') return 'Standing goes to black — the tournament leadership decides'
+function consequenceText(person: CardStanding, reason: CardReason): string {
+  const next = standingAfter(person.standing, reason.card)
+  const opponent = person.side === props.left ? props.right : props.left
+  if (next === 'YELLOW') return `${shortName(opponent)} gets a rack`
+  if (next === 'RED') return `${shortName(person.side)} loses the match`
+  if (next === 'BLACK') return 'Standing goes to black — the tournament leadership decides'
   return 'Warning only'
 }
 
-function kartenFragen(wer: Kartenstand, anlass: Kartenanlass) {
-  const neu = standDanach(wer.standing, anlass.karte)
-  anlassFuer.value = null
-  fragen({
-    frage: `${anlass.karte.toLowerCase()} card for ${wer.displayName}?`,
-    erklaerung: `${anlass.text}. Standing goes from ${standWort(wer.standing).toLowerCase()} `
-      + `to ${standWort(neu as Kartenstand['standing']).toLowerCase()}. ${folgeText(wer, anlass)}.`,
-    wort: `${anlass.karte.charAt(0)}${anlass.karte.slice(1).toLowerCase()} card`,
+function cardAsk(person: CardStanding, reason: CardReason) {
+  const next = standingAfter(person.standing, reason.card)
+  reasonOpenFor.value = null
+  ask({
+    question: `${reason.card.toLowerCase()} card for ${person.displayName}?`,
+    explanation: `${reason.text}. Standing goes from ${standingWord(person.standing).toLowerCase()} `
+      + `to ${standingWord(next as CardStanding['standing']).toLowerCase()}. ${consequenceText(person, reason)}.`,
+    word: `${reason.card.charAt(0)}${reason.card.slice(1).toLowerCase()} card`,
     // Dieselbe Regel wie bei der Aufgabe: nur am freigeschalteten Gerät.
     // Eine Karte trägt den Namen dessen, der sie gegeben hat, und "Tisch 7"
     // ist kein Name.
-    code: !props.alsMensch,
-    tun: (code: string) => kartenGeben(wer, anlass, code),
+    code: !props.asHuman,
+    act: (code: string) => cardGive(person, reason, code),
   })
 }
 
-const kartenLaeuft = ref(false)
+const cardBusy = ref(false)
 
-async function kartenGeben(wer: Kartenstand, anlass: Kartenanlass, code: string) {
-  kartenLaeuft.value = true
-  eigen.melden(null)
+async function cardGive(person: CardStanding, reason: CardReason, code: string) {
+  cardBusy.value = true
+  own.report(null)
   try {
-    await $fetch(`/api/board/matches/${props.partie.id}/cards`, {
+    await $fetch(`/api/board/matches/${props.match.id}/cards`, {
       method: 'POST',
       body: {
-        playerId: wer.playerId,
-        card: anlass.karte,
-        reasonCode: anlass.code,
+        playerId: person.playerId,
+        card: reason.card,
+        reasonCode: reason.code,
         ...(code === '' ? {} : { boardPin: code }),
       },
     })
     // Stand und Verlauf zusammen: die Karte ändert beides, und ein Block,
     // der die Folge des eigenen Drucks nicht zeigt, sieht aus wie einer,
     // bei dem nichts passiert ist.
-    await Promise.all([staendeHolen(), verlaufHolen()])
+    await Promise.all([fetchStandings(), historyFetch()])
   }
-  catch (roh: unknown) {
+  catch (raw: unknown) {
     /*
      * OBEN ROT UND NICHT IM BLOCK. Hier stand `kartenFehler.value = true`,
      * und das war die Angabe, die niemand las — die abgewiesene Karte blieb
@@ -1086,10 +1086,10 @@ async function kartenGeben(wer: Kartenstand, anlass: Kartenanlass, code: string)
      * nichts geändert, und ein Abruf, der dasselbe noch einmal bringt, sähe
      * aus wie eine Antwort auf den Druck.
      */
-    eigen.abweisen(roh)
+    own.reject(raw)
   }
   finally {
-    kartenLaeuft.value = false
+    cardBusy.value = false
   }
 }
 
@@ -1125,16 +1125,16 @@ async function kartenGeben(wer: Kartenstand, anlass: Kartenanlass, code: string)
  * auf, hängt an derselben Bremse wie jeder andere Codeweg und gibt den Namen
  * zurück.
  * --------------------------------------------------------------------- */
-function tischwechselFragen() {
-  fragen({
-    frage: 'Move this screen to another table?',
-    erklaerung: 'The match below stays as it is. This screen goes back to the '
+function tableSwitchAsk() {
+  ask({
+    question: 'Move this screen to another table?',
+    explanation: 'The match below stays as it is. This screen goes back to the '
       + 'table list and will show whatever is playing at the table you pick.',
-    wort: 'Change table',
+    word: 'Change table',
     // Dieselbe Regel wie bei der Karte und der Aufgabe: nur am
     // freigeschalteten Gerät ohne Menschen dahinter.
-    code: !props.alsMensch,
-    tun: (code: string) => void tischwechselTun(code),
+    code: !props.asHuman,
+    act: (code: string) => void tableSwitchAct(code),
   })
 }
 
@@ -1150,18 +1150,18 @@ function tischwechselFragen() {
  * die schlechtere Reihenfolge: dann stünde die Partie nicht mehr da, über
  * die gerade entschieden wird.
  */
-async function tischwechselTun(code: string) {
+async function tableSwitchAct(code: string) {
   if (code === '') {
-    emit('tischwechsel')
+    emit('tableSwitch')
     return
   }
-  eigen.melden(null)
+  own.report(null)
   try {
     await $fetch('/api/board/grant/pin', { method: 'POST', body: { pin: code } })
-    emit('tischwechsel')
+    emit('tableSwitch')
   }
-  catch (roh: unknown) {
-    eigen.abweisen(roh)
+  catch (raw: unknown) {
+    own.reject(raw)
   }
 }
 
@@ -1193,13 +1193,13 @@ async function tischwechselTun(code: string) {
  * Tafel dasselbe wie ein Stand von vorhin — dieselbe Regel wie für alles
  * andere, was dieses Gerät fragt.
  * --------------------------------------------------------------------- */
-const verlauf = ref<MatchEventPublic[] | null>(null)
-const verlaufLaedt = ref(true)
-const verlaufFehler = ref(false)
+const history = ref<MatchEventPublic[] | null>(null)
+const historyLoading = ref(true)
+const historyError = ref(false)
 
-async function verlaufHolen() {
-  verlaufLaedt.value = true
-  verlaufFehler.value = false
+async function historyFetch() {
+  historyLoading.value = true
+  historyError.value = false
   try {
     /*
      * DIE EIGENE ROUTE UND NICHT DIE ÖFFENTLICHE.
@@ -1210,12 +1210,12 @@ async function verlaufHolen() {
      * sind hier aber die Zeilen, wegen derer jemand nachschaut — der
      * `case 'NOTE'` unten stand deshalb bis zum 15.09.2026 wirkungslos da.
      */
-    const roh = await $fetch<MatchEventPublic[]>(
-      `/api/board/matches/${props.partie.id}/timeline`,
+    const raw = await $fetch<MatchEventPublic[]>(
+      `/api/board/matches/${props.match.id}/timeline`,
       { headers: { 'cache-control': 'no-cache' } },
     )
     // Die Anwendung liefert aufsteigend; am Tisch wird von hinten gelesen.
-    verlauf.value = [...roh].reverse()
+    history.value = [...raw].reverse()
   }
   catch {
     /*
@@ -1223,15 +1223,15 @@ async function verlaufHolen() {
      * auch nicht wie einer behandeln: die drei Handlungen dieses Menüs
      * müssen weiter gehen. Es bleibt bei einer Zeile und einem Knopf.
      */
-    verlaufFehler.value = true
-    verlauf.value = null
+    historyError.value = true
+    history.value = null
   }
   finally {
-    verlaufLaedt.value = false
+    historyLoading.value = false
   }
 }
 
-onMounted(verlaufHolen)
+onMounted(historyFetch)
 
 /*
  * NACHGELADEN WIRD NUR, WAS DIESES MENÜ SELBST AUSGELÖST HAT.
@@ -1248,8 +1248,8 @@ onMounted(verlaufHolen)
  * Vorhang kann ohnehin niemand zählen; er deckt die Leiste zu.
  */
 watch(
-  () => [props.zusatz?.timeoutsTaken?.A, props.zusatz?.timeoutsTaken?.B, props.partie.status].join('|'),
-  () => { if (!verlaufLaedt.value) verlaufHolen() },
+  () => [props.extra?.timeoutsTaken?.A, props.extra?.timeoutsTaken?.B, props.match.status].join('|'),
+  () => { if (!historyLoading.value) historyFetch() },
 )
 
 /**
@@ -1261,8 +1261,8 @@ watch(
  * Einträge, und zwanzig Zeilen an einem Tisch sind keine Auskunft, sondern
  * ein Protokoll — wer es braucht, klappt es auf.
  */
-const KURZ_ANZAHL = 4
-const alleZeigen = ref(false)
+const SHORT_COUNT = 4
+const showAll = ref(false)
 
 /**
  * Was eine Zeile sagt — oder `null`, wenn sie nicht an den Tisch gehört.
@@ -1306,21 +1306,21 @@ const alleZeigen = ref(false)
  * Abfragen mit zwei verschiedenen Filtern, und eine gemeinsame Datei nur
  * für drei Sätze verbände zwei Seiten, die sonst nichts teilen.
  */
-function quittungText(e: MatchEventPublic): string {
-  const weg = e.actorVia ?? null
-  if (weg === 'BOARD' || weg === 'BOARD_PIN') return 'Shot clock acknowledged at the table'
-  if (weg === 'SESSION') return 'Shot clock acknowledged from the tournament office — not at the table'
+function ackText(e: MatchEventPublic): string {
+  const via = e.actorVia ?? null
+  if (via === 'BOARD' || via === 'BOARD_PIN') return 'Shot clock acknowledged at the table'
+  if (via === 'SESSION') return 'Shot clock acknowledged from the tournament office — not at the table'
   return 'Shot clock acknowledged'
 }
 
-function zeilenText(e: MatchEventPublic): string | null {
-  const wer = e.side ? kurzname(e.side) : ''
+function rowText(e: MatchEventPublic): string | null {
+  const actor = e.side ? shortName(e.side) : ''
   const d = e.detail ?? {}
   switch (e.kind) {
     case 'TABLE_ASSIGNED': return `Called to table ${d.table ?? '?'}`
     case 'TABLE_RELEASED': return 'Taken off the table'
-    case 'STARTED': return wer ? `Started · ${wer} breaks` : 'Started'
-    case 'SCORE': return `Rack for ${wer}`
+    case 'STARTED': return actor ? `Started · ${actor} breaks` : 'Started'
+    case 'SCORE': return `Rack for ${actor}`
     /*
      * DAS ZUGESPROCHENE RACK — § 9.1.2 der Sportordnung.
      *
@@ -1335,8 +1335,8 @@ function zeilenText(e: MatchEventPublic): string | null {
      * Tabelle, die `bb_public` gar nicht kennt.
      */
     case 'PENALTY_RACK': return d.unit === 'points'
-      ? `${d.units ?? '?'} points awarded to ${wer} (penalty)`
-      : `Rack awarded to ${wer} (penalty)`
+      ? `${d.units ?? '?'} points awarded to ${actor} (penalty)`
+      : `Rack awarded to ${actor} (penalty)`
     /*
      * ZWEI ZEILEN FÜR ZWEI VERSCHIEDENE VORGÄNGE, und der Unterschied ist
      * die Frage, die am Tisch gestellt wird: war das ein Vertipper, oder
@@ -1350,24 +1350,24 @@ function zeilenText(e: MatchEventPublic): string | null {
      * Beide tragen die beiden Zahlen im Beiwerk und nicht im eigenen Stand —
      * genau die Zeile, wegen der man nachschaut.
      */
-    case 'UNDO': return `Taken back for ${wer}: ${d.undoneFrom ?? '?'} → ${d.undoneTo ?? '?'}`
+    case 'UNDO': return `Taken back for ${actor}: ${d.undoneFrom ?? '?'} → ${d.undoneTo ?? '?'}`
     case 'NOTE': return d.correctedFrom !== undefined
-      ? `Score corrected for ${wer}: ${d.correctedFrom} → ${d.correctedTo}`
+      ? `Score corrected for ${actor}: ${d.correctedFrom} → ${d.correctedTo}`
       : null
-    case 'TIMEOUT_STARTED': return `Time-out ${wer}`
-    case 'TIMEOUT_ENDED': return `Time-out ${wer} over (${d.seconds ?? '?'} s)`
-    case 'TIMEOUT_WITHDRAWN': return `Time-out ${wer} taken back (${d.seconds ?? '?'} s)`
+    case 'TIMEOUT_STARTED': return `Time-out ${actor}`
+    case 'TIMEOUT_ENDED': return `Time-out ${actor} over (${d.seconds ?? '?'} s)`
+    case 'TIMEOUT_WITHDRAWN': return `Time-out ${actor} taken back (${d.seconds ?? '?'} s)`
     /*
      * DIE SHOT-CLOCK — DREI ZUSTÄNDE UND KEINE SEKUNDE.
      *
-     * `wer` steht hier NICHT mehr, und das ist der Punkt: die Zuweisung
+     * `actor` steht hier NICHT mehr, und das ist der Punkt: die Zuweisung
      * nennt keine Seite (`side` bleibt NULL). Der Verlauf einer Partie ist
      * öffentlich lesbar; "die Shot-Clock gilt" ist eine Tatsache über die
      * Partie, "die Shot-Clock gegen Herrn X" wäre eine Aussage über einen
      * Menschen. Wen sie trifft, sieht im Saal ohnehin jeder, sobald der
      * Schiedsrichter die Uhr stellt.
      *
-     * Bis hierher stand da `Shot clock for ${wer}` — aus einer Zeit, in der
+     * Bis hierher stand da `Shot clock for ${actor}` — aus einer Zeit, in der
      * niemand dieses Ereignis je geschrieben hat. Mit leerer Seite hätte der
      * Satz "Shot clock for " gelautet.
      *
@@ -1375,7 +1375,7 @@ function zeilenText(e: MatchEventPublic): string | null {
      * Schiedsrichter führt die Uhr am Tisch mit seiner eigenen Stoppuhr.
      */
     case 'SHOT_CLOCK': return d.state === 'ACKNOWLEDGED'
-      ? quittungText(e)
+      ? ackText(e)
       : d.state === 'LIFTED'
         ? 'Shot clock lifted'
         : 'Shot clock ordered'
@@ -1399,23 +1399,23 @@ function zeilenText(e: MatchEventPublic): string | null {
      * Auskunft.
      */
     case 'FOUL': return d.rule === 'BREAK'
-      ? `Break foul ${wer} (−${d.points ?? 2})`
+      ? `Break foul ${actor} (−${d.points ?? 2})`
       : d.rule === 'THIRD'
-        ? `Third foul in a row ${wer} (−${d.points ?? 16} · all fifteen re-racked)`
-        : `Foul ${wer} (−${d.points ?? 1})`
-    case 'FINISHED': return wer ? `Finished · ${wer} wins` : 'Finished'
+        ? `Third foul in a row ${actor} (−${d.points ?? 16} · all fifteen re-racked)`
+        : `Foul ${actor} (−${d.points ?? 1})`
+    case 'FINISHED': return actor ? `Finished · ${actor} wins` : 'Finished'
     case 'RESET': return 'Match reset'
     case 'APPROVED': return null
     default: return e.kind.toLowerCase().replace(/_/g, ' ')
   }
 }
 
-interface Verlaufszeile {
+interface HistoryRow {
   /** Trägt Zeitpunkt, Art, Seite und Stand — zwei Einträge teilen ihn nicht. */
-  schluessel: string
+  rowKey: string
   at: string
   text: string
-  stand: string | null
+  score: string | null
   /**
    * WER es war — oder `null`, wenn es bloss das Gerät war.
    *
@@ -1429,28 +1429,28 @@ interface Verlaufszeile {
    * und nicht diese Datei; an einer gezählten Aufnahme stünde sonst
    * zwanzigmal „Anzeigetafel · Tisch 7".
    */
-  wer: string | null
+  actor: string | null
 }
 
-const zeilen = computed<Verlaufszeile[]>(() =>
-  (verlauf.value ?? []).flatMap((e) => {
-    const text = zeilenText(e)
+const rows = computed<HistoryRow[]>(() =>
+  (history.value ?? []).flatMap((e) => {
+    const text = rowText(e)
     if (!text) return []
     return [{
-      schluessel: `${e.at}|${e.kind}|${e.side ?? ''}|${e.scoreA}|${e.scoreB}`,
+      rowKey: `${e.at}|${e.kind}|${e.side ?? ''}|${e.scoreA}|${e.scoreB}`,
       at: e.at,
       text,
-      stand: e.scoreA !== null && e.scoreB !== null
+      score: e.scoreA !== null && e.scoreB !== null
         // In der Lage der Tafel und nicht in der der Datenbank: wer links
         // steht, steht auch hier links. Sonst liest sich 8:5 verkehrt herum.
-        ? `${props.links === 'A' ? e.scoreA : e.scoreB}:${props.links === 'A' ? e.scoreB : e.scoreA}`
+        ? `${props.left === 'A' ? e.scoreA : e.scoreB}:${props.left === 'A' ? e.scoreB : e.scoreA}`
         : null,
-      wer: e.actorName ?? null,
+      actor: e.actorName ?? null,
     }]
   }))
 
-const sichtbareZeilen = computed(() =>
-  alleZeigen.value ? zeilen.value : zeilen.value.slice(0, KURZ_ANZAHL))
+const visibleRows = computed(() =>
+  showAll.value ? rows.value : rows.value.slice(0, SHORT_COUNT))
 
 /* ------------------------------------------------------------------------
  * DIE ZEITEN
@@ -1469,12 +1469,12 @@ const sichtbareZeilen = computed(() =>
  * Halle gestellt ist, weiss niemand, und "9:46 pm" in einem Protokoll, das
  * sonst durchgehend 24 Stunden führt, ist eine Fehlerquelle.
  * --------------------------------------------------------------------- */
-const uhrzeitFormat = new Intl.DateTimeFormat('en-GB', {
+const timeFormat = new Intl.DateTimeFormat('en-GB', {
   hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
 })
 
-function uhrzeit(iso: string): string {
-  return uhrzeitFormat.format(new Date(iso))
+function formatTime(iso: string): string {
+  return timeFormat.format(new Date(iso))
 }
 
 /*
@@ -1483,22 +1483,22 @@ function uhrzeit(iso: string): string {
  * Eintrag, der inzwischen vier Minuten alt ist, ist schlechter als keine
  * Angabe. Alle zehn Sekunden reicht — feiner als die Anzeige selbst.
  */
-const jetzt = ref(Date.now())
-let uhrTakt: ReturnType<typeof setInterval> | null = null
+const now = ref(Date.now())
+let nowTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
-  uhrTakt = setInterval(() => { jetzt.value = Date.now() }, 10_000)
+  nowTimer = setInterval(() => { now.value = Date.now() }, 10_000)
 })
 onBeforeUnmount(() => {
-  if (uhrTakt) clearInterval(uhrTakt)
+  if (nowTimer) clearInterval(nowTimer)
 })
 
-function abstand(iso: string): string {
-  const ms = jetzt.value - new Date(iso).getTime()
-  const minuten = Math.floor(ms / 60_000)
-  if (minuten < 1) return 'just now'
-  if (minuten < 60) return `${minuten} min`
-  return `${Math.floor(minuten / 60)}:${String(minuten % 60).padStart(2, '0')} h`
+function ago(iso: string): string {
+  const ms = now.value - new Date(iso).getTime()
+  const minutes = Math.floor(ms / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes} min`
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, '0')} h`
 }
 
 /* ------------------------------------------------------------------------
@@ -1519,23 +1519,23 @@ function abstand(iso: string): string {
  * gelesen. Und jede Berührung — auch das Schieben der Liste — stellt die Uhr
  * ohnehin auf Anfang.
  * --------------------------------------------------------------------- */
-const RUHE_MS = 30_000
-const RUHE_LESEN_MS = 180_000
-let ruheUhr: ReturnType<typeof setTimeout> | null = null
+const IDLE_MS = 30_000
+const IDLE_READING_MS = 180_000
+let idleTimer: ReturnType<typeof setTimeout> | null = null
 
-const ruheFrist = computed(() => alleZeigen.value ? RUHE_LESEN_MS : RUHE_MS)
+const idleDeadline = computed(() => showAll.value ? IDLE_READING_MS : IDLE_MS)
 
-function anstupsen() {
-  if (ruheUhr) clearTimeout(ruheUhr)
-  ruheUhr = setTimeout(() => emit('schliessen'), ruheFrist.value)
+function nudge() {
+  if (idleTimer) clearTimeout(idleTimer)
+  idleTimer = setTimeout(() => emit('close'), idleDeadline.value)
 }
 
 // Auf- und Zuklappen ändert die Frist — die laufende Uhr muss die neue haben.
-watch(ruheFrist, anstupsen)
+watch(idleDeadline, nudge)
 
-onMounted(anstupsen)
+onMounted(nudge)
 onBeforeUnmount(() => {
-  if (ruheUhr) clearTimeout(ruheUhr)
+  if (idleTimer) clearTimeout(idleTimer)
 })
 
 /*
@@ -1552,27 +1552,27 @@ onBeforeUnmount(() => {
     Der Vorhang liegt über allem und fängt jede Berührung ab — auch die, die
     danebengeht. Sonst zählte ein Fehlgriff neben dem Menü einen Satz hoch.
   -->
-  <div class="menue" @pointerdown.stop="anstupsen" @keydown="anstupsen">
+  <div class="menue" @pointerdown.stop="nudge" @keydown="nudge">
     <!--
       DER STAND BLEIBT OBEN. Klein, aber vollständig: Namen, Zahlen, Tisch.
       Wer im Saal auf die Tafel sieht, während der Schiedsrichter arbeitet,
       soll die Partie nicht verlieren.
     -->
     <header class="menue__stand">
-      <span class="menue__name">{{ langname(links) }}</span>
-      <span class="menue__zahlen">{{ punkte(links) }}<span class="menue__strich">:</span>{{ punkte(rechts) }}</span>
-      <span class="menue__name menue__name--rechts">{{ langname(rechts) }}</span>
+      <span class="menue__name">{{ longName(left) }}</span>
+      <span class="menue__zahlen">{{ points(left) }}<span class="menue__strich">:</span>{{ points(right) }}</span>
+      <span class="menue__name menue__name--rechts">{{ longName(right) }}</span>
     </header>
 
     <!--
       Die rote Zeile steht über den Flächen, wie in der Zählleiste und aus
       demselben Grund: wer eben getippt hat, schaut nach oben.
     -->
-    <p v-if="roteZeile" class="menue__fehler" role="alert">{{ roteZeile.text }}</p>
+    <p v-if="redLine" class="menue__fehler" role="alert">{{ redLine.text }}</p>
 
     <div class="menue__kopfzeile">
       <p class="menue__titel">Referee</p>
-      <button type="button" class="menue__zu" @click="emit('schliessen')">
+      <button type="button" class="menue__zu" @click="emit('close')">
         Close
         <span class="menue__zu-taste" aria-hidden="true">0</span>
       </button>
@@ -1583,7 +1583,7 @@ onBeforeUnmount(() => {
       und wer den Verlauf mit einer Fernbedienung oder einem angeschlossenen
       Rad durchgeht, berührt in dessen Sinn nichts.
     -->
-    <div class="menue__inhalt" @scroll.passive="anstupsen">
+    <div class="menue__inhalt" @scroll.passive="nudge">
       <!--
         DIE SHOT-CLOCK — GANZ OBEN, WEIL SIE DIE PARTIE ANHÄLT.
 
@@ -1601,57 +1601,57 @@ onBeforeUnmount(() => {
         unten in der Zählleiste. Dort gehört er hin: er geht den Saal an, und
         das Menü ist zu.
       -->
-      <section v-if="shotClockOffen" class="menue__block">
+      <section v-if="shotClockPending" class="menue__block">
         <h2 class="menue__ueber">Shot clock</h2>
-        <BoardZaehltaste
-          beschriftung="Acknowledge the shot clock"
-          hinweis="the score does not go on before this"
-          breite="voll" art="plus"
-          taste="R"
-          :arbeitet="laeuft"
-          @click="shotClockFragen()"
+        <BoardScoreKey
+          label="Acknowledge the shot clock"
+          hint="the score does not go on before this"
+          width="voll" kind="plus"
+          key="R"
+          :busy="busy"
+          @click="shotClockAsk()"
         />
       </section>
 
       <!--
         DAS ZEITLIMIT (HEYBALL) — nur bei gesetztem Zeitlimit im Dokument
-        (`zeitlimit` ist sonst `null`); an den meisten Turnieren gibt es
+        (`timeLimit` ist sonst `null`); an den meisten Turnieren gibt es
         keins, und dort erscheint dieser Abschnitt nicht.
 
         Anhalten/Fortsetzen steht IMMER da, sobald ein Zeitlimit gilt — der
         Schiedsrichter braucht diesen Griff nach praktisch jedem Rack (siehe
         `zeitlimitLaufenSchalten`). Das Beenden kommt erst dazu, wenn die
-        Zeit auch WIRKLICH um ist (`zeitlimit.ueberzogen`); ein Gleichstand
+        Zeit auch WIRKLICH um ist (`zeitlimit.overrun`); ein Gleichstand
         bekommt zwei Flächen statt einer, weil nur der Schiedsrichter weiss,
         wer den Shoot-out gewonnen hat.
       -->
-      <section v-if="zeitlimit" class="menue__block">
+      <section v-if="timeLimit" class="menue__block">
         <h2 class="menue__ueber">Time limit</h2>
-        <BoardZaehltaste
-          :beschriftung="zeitlimit.running ? 'Pause the clock' : 'Resume the clock'"
-          :hinweis="`${zeitlimit.running ? 'running' : 'paused'} · ${zeitlimit.text}`"
-          breite="voll"
-          :arbeitet="laeuft"
-          @click="zeitlimitLaufenSchalten()"
+        <BoardScoreKey
+          :label="timeLimit.running ? 'Pause the clock' : 'Resume the clock'"
+          :hint="`${timeLimit.running ? 'running' : 'paused'} · ${timeLimit.text}`"
+          width="voll"
+          :busy="busy"
+          @click="timeLimitToggleRunning()"
         />
-        <template v-if="zeitlimit.ueberzogen">
-          <div v-if="zeitlimitUnentschieden" class="menue__paar">
-            <BoardZaehltaste
-              v-for="seite in [links, rechts]" :key="`zeitlimit-so-${seite}`"
-              :beschriftung="`${kurzname(seite)} wins the shoot-out`"
-              hinweis="the match is tied at the time limit"
-              breite="voll" art="ende"
-              :arbeitet="laeuft"
-              @click="zeitlimitShootoutFragen(seite)"
+        <template v-if="timeLimit.overrun">
+          <div v-if="timeLimitTied" class="menue__paar">
+            <BoardScoreKey
+              v-for="side in [left, right]" :key="`timeLimit-so-${side}`"
+              :label="`${shortName(side)} wins the shoot-out`"
+              hint="the match is tied at the time limit"
+              width="voll" kind="ende"
+              :busy="busy"
+              @click="timeLimitShootoutAsk(side)"
             />
           </div>
-          <BoardZaehltaste
+          <BoardScoreKey
             v-else
-            beschriftung="Finish"
-            :hinweis="`${kurzname(zeitlimitFuehrend)} leads on the clock`"
-            breite="voll" art="ende"
-            :arbeitet="laeuft"
-            @click="zeitlimitBeendenFragen()"
+            label="Finish"
+            :hint="`${shortName(timeLimitLeader)} leads on the clock`"
+            width="voll" kind="ende"
+            :busy="busy"
+            @click="timeLimitFinishAsk()"
           />
         </template>
       </section>
@@ -1663,25 +1663,25 @@ onBeforeUnmount(() => {
         läuft (`satzModus` ist sonst `null`) — an jeder anderen Partie
         erscheint dieser Block nicht. Siehe die Begründung an `satzModus`.
       -->
-      <section v-if="satzModus" class="menue__block">
-        <h2 class="menue__ueber">{{ satzModus === 'SNOOKER' ? 'Frame' : 'Set' }}</h2>
-        <BoardZaehltaste
-          v-if="satzModus === 'POOL'"
-          beschriftung="Confirm set"
-          :hinweis="satzErreicht ? 'the set race has been reached' : 'nobody has reached the set race yet'"
-          breite="voll" art="ende"
-          :gesperrt="!satzErreicht"
-          :arbeitet="laeuft"
-          @click="satzFragen()"
+      <section v-if="setMode" class="menue__block">
+        <h2 class="menue__ueber">{{ setMode === 'SNOOKER' ? 'Frame' : 'Set' }}</h2>
+        <BoardScoreKey
+          v-if="setMode === 'POOL'"
+          label="Confirm set"
+          :hint="setReached ? 'the set race has been reached' : 'nobody has reached the set race yet'"
+          width="voll" kind="ende"
+          :locked="!setReached"
+          :busy="busy"
+          @click="setAsk()"
         />
         <div v-else class="menue__paar">
-          <BoardZaehltaste
-            v-for="seite in [links, rechts]" :key="`satz-${seite}`"
-            :beschriftung="`Confirm frame — ${kurzname(seite)} wins`"
-            hinweis="ends this frame · the next one starts at 0:0"
-            breite="voll" art="ende"
-            :arbeitet="laeuft"
-            @click="satzFragen(seite)"
+          <BoardScoreKey
+            v-for="side in [left, right]" :key="`satz-${side}`"
+            :label="`Confirm frame — ${shortName(side)} wins`"
+            hint="ends this frame · the next one starts at 0:0"
+            width="voll" kind="ende"
+            :busy="busy"
+            @click="setAsk(side)"
           />
         </div>
       </section>
@@ -1693,13 +1693,13 @@ onBeforeUnmount(() => {
       <section class="menue__block">
         <h2 class="menue__ueber">Time-out taken by mistake</h2>
         <div class="menue__paar">
-          <BoardZaehltaste
-            v-for="seite in [links, rechts]" :key="`auszeit-${seite}`"
-            :beschriftung="`Take back ${kurzname(seite)}`"
-            :hinweis="auszeitPunkt(seite).hinweis"
-            breite="voll" art="minus"
-            :gesperrt="!auszeitPunkt(seite).moeglich" :arbeitet="laeuft"
-            @click="auszeitZurueckFragen(seite)"
+          <BoardScoreKey
+            v-for="side in [left, right]" :key="`auszeit-${side}`"
+            :label="`Take back ${shortName(side)}`"
+            :hint="timeoutEntry(side).hint"
+            width="voll" kind="minus"
+            :locked="!timeoutEntry(side).possible" :busy="busy"
+            @click="timeoutBackAsk(side)"
           />
         </div>
       </section>
@@ -1718,14 +1718,14 @@ onBeforeUnmount(() => {
         Fläche, die ihre Aussage allein aus der Farbe bezieht, sagt einem
         Farbenblinden nichts.
       -->
-      <section v-if="staende && staende.length" class="menue__block">
+      <section v-if="standings && standings.length" class="menue__block">
         <h2 class="menue__ueber">Warnings</h2>
         <div class="menue__paar">
-          <div v-for="seite in [links, rechts]" :key="`karte-${seite}`" class="karten__seite">
-            <div v-for="wer in staendeDer(seite)" :key="wer.playerId" class="karten__mensch">
-              <div class="karten__stand" :class="`karten__stand--${wer.standing.toLowerCase()}`">
-                <span class="karten__name">{{ wer.displayName }}</span>
-                <span class="karten__wort">{{ standWort(wer.standing) }}</span>
+          <div v-for="side in [left, right]" :key="`card-${side}`" class="karten__seite">
+            <div v-for="person in standingsFor(side)" :key="person.playerId" class="karten__mensch">
+              <div class="karten__stand" :class="`karten__stand--${person.standing.toLowerCase()}`">
+                <span class="karten__name">{{ person.displayName }}</span>
+                <span class="karten__wort">{{ standingWord(person.standing) }}</span>
               </div>
 
               <!--
@@ -1734,28 +1734,28 @@ onBeforeUnmount(() => {
                 Fläche, die etwas anbietet, das der Server danach abweist,
                 ist eine unehrliche Fläche.
               -->
-              <p v-if="wer.standing === 'BLACK'" class="karten__hinweis">
+              <p v-if="person.standing === 'BLACK'" class="karten__hinweis">
                 Standing: black — the tournament leadership decides.
               </p>
 
-              <BoardZaehltaste
+              <BoardScoreKey
                 v-else
-                :beschriftung="anlassFuer?.playerId === wer.playerId ? 'Cancel' : 'Give a card'"
-                hinweis="what happened decides the colour"
-                breite="voll" :arbeitet="laeuft || kartenLaeuft"
-                @click="anlassOeffnen(wer)"
+                :label="reasonOpenFor?.playerId === person.playerId ? 'Cancel' : 'Give a card'"
+                hint="what happened decides the colour"
+                width="voll" :busy="busy || cardBusy"
+                @click="reasonToggle(person)"
               />
 
-              <ul v-if="anlassFuer?.playerId === wer.playerId" class="anlass">
-                <li v-for="a in anlaesse" :key="a.code">
+              <ul v-if="reasonOpenFor?.playerId === person.playerId" class="anlass">
+                <li v-for="a in reasons" :key="a.code">
                   <button
                     type="button" class="anlass__zeile"
-                    :class="`anlass__zeile--${a.karte.toLowerCase()}`"
-                    :disabled="laeuft || kartenLaeuft"
-                    @click="kartenFragen(wer, a)"
+                    :class="`anlass__zeile--${a.card.toLowerCase()}`"
+                    :disabled="busy || cardBusy"
+                    @click="cardAsk(person, a)"
                   >
                     <span class="anlass__text">{{ a.text }}</span>
-                    <span class="anlass__folge">{{ folgeText(wer, a) }}</span>
+                    <span class="anlass__folge">{{ consequenceText(person, a) }}</span>
                   </button>
                 </li>
               </ul>
@@ -1770,15 +1770,15 @@ onBeforeUnmount(() => {
       -->
       <section class="menue__block">
         <h2 class="menue__ueber">
-          {{ aufgabeArt === 'NO_SHOW' ? 'Nobody at the table' : 'A player stops' }}
+          {{ retireKind === 'NO_SHOW' ? 'Nobody at the table' : 'A player stops' }}
         </h2>
         <div class="menue__paar">
-          <BoardZaehltaste
-            v-for="seite in [links, rechts]" :key="`aufgabe-${seite}`"
-            :beschriftung="aufgabeWort(seite)"
-            :hinweis="aufgabeHinweis(seite)"
-            breite="voll" :arbeitet="laeuft"
-            @click="aufgabeFragen(seite)"
+          <BoardScoreKey
+            v-for="side in [left, right]" :key="`giveUp-${side}`"
+            :label="retireWord(side)"
+            :hint="retireHint(side)"
+            width="voll" :busy="busy"
+            @click="retireAsk(side)"
           />
         </div>
       </section>
@@ -1792,11 +1792,11 @@ onBeforeUnmount(() => {
       -->
       <section class="menue__block">
         <h2 class="menue__ueber">This screen</h2>
-        <BoardZaehltaste
-          beschriftung="Change table"
-          hinweis="back to the table list"
-          breite="voll" :arbeitet="laeuft"
-          @click="tischwechselFragen()"
+        <BoardScoreKey
+          label="Change table"
+          hint="back to the table list"
+          width="voll" :busy="busy"
+          @click="tableSwitchAsk()"
         />
       </section>
 
@@ -1811,9 +1811,9 @@ onBeforeUnmount(() => {
       <section class="menue__block">
         <h2 class="menue__ueber">Remote control</h2>
         <dl class="belegung">
-          <template v-for="(rowRec, i) in belegung" :key="`${rowRec.taste}-${i}`">
-            <dt class="belegung__taste">{{ rowRec.taste }}</dt>
-            <dd class="belegung__was">{{ rowRec.was }}</dd>
+          <template v-for="(rowRec, i) in layout" :key="`${rowRec.key}-${i}`">
+            <dt class="belegung__taste">{{ rowRec.key }}</dt>
+            <dd class="belegung__was">{{ rowRec.action }}</dd>
           </template>
         </dl>
         <!--
@@ -1825,7 +1825,7 @@ onBeforeUnmount(() => {
           am Telefon danach fragt, und die einen sonst nie interessiert.
         -->
         <p class="belegung__fassung">
-          Version {{ fassung }}<template v-if="fassungWartet"> · update pending</template>
+          Version {{ version }}<template v-if="versionPending"> · update pending</template>
         </p>
       </section>
 
@@ -1849,16 +1849,16 @@ onBeforeUnmount(() => {
       <section class="menue__block">
         <h2 class="menue__ueber">What happened</h2>
 
-        <p v-if="verlaufLaedt && !verlauf" class="verlauf__zeile">Loading …</p>
+        <p v-if="historyLoading && !history" class="verlauf__zeile">Loading …</p>
 
-        <div v-else-if="verlaufFehler" class="verlauf__leer">
+        <div v-else-if="historyError" class="verlauf__leer">
           <span>History not available</span>
-          <button type="button" class="verlauf__mehr" @click="verlaufHolen()">
+          <button type="button" class="verlauf__mehr" @click="historyFetch()">
             Try again
           </button>
         </div>
 
-        <p v-else-if="!zeilen.length" class="verlauf__zeile">
+        <p v-else-if="!rows.length" class="verlauf__zeile">
           Nothing recorded for this match yet
         </p>
 
@@ -1870,10 +1870,10 @@ onBeforeUnmount(() => {
             stehen und muss erst geschoben werden.
           -->
           <ol class="verlauf">
-            <li v-for="z in sichtbareZeilen" :key="z.schluessel" class="verlauf__reihe">
+            <li v-for="z in visibleRows" :key="z.rowKey" class="verlauf__reihe">
               <span class="verlauf__zeit">
-                <span class="verlauf__her">{{ abstand(z.at) }}</span>
-                <span class="verlauf__uhr">{{ uhrzeit(z.at) }}</span>
+                <span class="verlauf__her">{{ ago(z.at) }}</span>
+                <span class="verlauf__uhr">{{ formatTime(z.at) }}</span>
               </span>
               <span class="verlauf__was">
                 {{ z.text }}
@@ -1889,24 +1889,24 @@ onBeforeUnmount(() => {
                   `wer`. Zwanzig Zeilen mit demselben Zusatz wären kein
                   Protokoll, sondern ein Muster.
                 -->
-                <span v-if="z.wer" class="verlauf__wer">{{ z.wer }}</span>
+                <span v-if="z.actor" class="verlauf__wer">{{ z.actor }}</span>
               </span>
-              <span v-if="z.stand" class="verlauf__stand">{{ z.stand }}</span>
+              <span v-if="z.score" class="verlauf__stand">{{ z.score }}</span>
             </li>
           </ol>
 
           <!--
-            Kein BoardZaehltaste: die Flächen der Leiste sperren sich, solange
+            Kein BoardScoreKey: die Flächen der Leiste sperren sich, solange
             eine Eingabe unterwegs ist. Nachsehen ist keine Eingabe und darf
             nie auf eine warten.
           -->
           <button
-            v-if="zeilen.length > KURZ_ANZAHL"
+            v-if="rows.length > SHORT_COUNT"
             type="button" class="verlauf__mehr"
-            @click="alleZeigen = !alleZeigen"
+            @click="showAll = !showAll"
           >
-            {{ alleZeigen ? `Show only the last ${KURZ_ANZAHL}` : `Show all ${zeilen.length}` }}
-            <span v-if="alleZeigen" class="verlauf__ruhe">stays open while you read</span>
+            {{ showAll ? `Show only the last ${SHORT_COUNT}` : `Show all ${rows.length}` }}
+            <span v-if="showAll" class="verlauf__ruhe">stays open while you read</span>
           </button>
         </template>
       </section>
@@ -1917,9 +1917,9 @@ onBeforeUnmount(() => {
       Stand oben bleibt sichtbar, denn bei einer Aufgabe ist genau er das,
       was gleich festgeschrieben wird.
     -->
-    <div v-if="rueckfrage" class="frage">
-      <p class="frage__kopf">{{ rueckfrage.frage }}</p>
-      <p class="frage__text">{{ rueckfrage.erklaerung }}</p>
+    <div v-if="confirmation" class="frage">
+      <p class="frage__kopf">{{ confirmation.question }}</p>
+      <p class="frage__text">{{ confirmation.explanation }}</p>
 
       <!--
         DIE SECHS ZIFFERN, WENN DIESER SCHRITT SIE VERLANGT.
@@ -1934,15 +1934,15 @@ onBeforeUnmount(() => {
         und vergeht mit der Rueckfrage, und das Merkmal wirkt nur beim
         ersten Aufbau der Seite.
       -->
-      <div v-if="rueckfrage.code" class="frage__code">
+      <div v-if="confirmation.code" class="frage__code">
         <label class="frage__code-text" for="board-pin">
           Enter your personal code
         </label>
         <input
-          id="board-pin" ref="codeFeld" v-model="codeZiffern" class="frage__code-feld"
+          id="board-pin" ref="codeField" v-model="codeDigits" class="frage__code-feld"
           inputmode="numeric" autocomplete="off" maxlength="6"
           placeholder="······" aria-describedby="board-pin-hint"
-          @keyup.enter="jaSagen()"
+          @keyup.enter="confirmYes()"
         >
         <p id="board-pin-hint" class="frage__code-hinweis">
           Six digits. The tournament office hands them out.
@@ -1950,14 +1950,14 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="frage__tasten">
-        <BoardZaehltaste
-          beschriftung="Cancel" breite="voll" art="minus"
-          @click="frageSchliessen()"
+        <BoardScoreKey
+          label="Cancel" width="voll" kind="minus"
+          @click="closeConfirmation()"
         />
-        <BoardZaehltaste
-          :beschriftung="rueckfrage.wort" breite="voll" art="ende"
-          :gesperrt="rueckfrage.code && !codeVollstaendig"
-          :arbeitet="laeuft" @click="jaSagen()"
+        <BoardScoreKey
+          :label="confirmation.word" width="voll" kind="ende"
+          :locked="confirmation.code && !codeComplete"
+          :busy="busy" @click="confirmYes()"
         />
       </div>
     </div>

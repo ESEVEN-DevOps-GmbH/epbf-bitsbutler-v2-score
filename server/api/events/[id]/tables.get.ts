@@ -18,14 +18,14 @@
 export default defineEventHandler(async (event) => {
   const id = parseId(getRouterParam(event, 'id'), 'Veranstaltungskennung')
 
-  const basis = String(process.env.BB_API ?? '')
-  if (!basis) {
+  const base = String(process.env.BB_API ?? '')
+  if (!base) {
     throw createError({ statusCode: 503, statusMessage: 'Scoring not reachable' })
   }
 
-  const tische = await getBoardTables(basis, String(process.env.BB_SITE ?? ''), id)
-  if (!tische) {
+  const tables = await getBoardTables(base, String(process.env.BB_SITE ?? ''), id)
+  if (!tables) {
     throw createError({ statusCode: 404, statusMessage: 'Veranstaltung nicht gefunden' })
   }
-  return tische
+  return tables
 })

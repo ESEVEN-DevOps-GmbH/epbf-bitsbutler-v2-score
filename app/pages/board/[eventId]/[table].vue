@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { Match, MatchSide, MatchStatus, SponsorRank, TableBoard } from '~~/shared/types/api'
-import type { Seite, Standpaar, Zusatz } from '~/composables/useZaehlwerk'
+import type { Side, ScorePair, Extra } from '~/composables/useScoring'
 
 /**
  * DIE MARKE DER TAFEL SELBST — UND KEINE ZWEITE DAHINTER
@@ -11,8 +11,8 @@ import type { Seite, Standpaar, Zusatz } from '~/composables/useZaehlwerk'
  * Namen sie zeigen müsste — nur ihren eigenen, denselben, den auch das
  * Installations-Manifest trägt (server/routes/board.webmanifest.get.ts).
  */
-const MARKENNAME = 'BitsButler Scoreboard'
-const MARKENKUERZEL = 'Scoreboard'
+const BRAND_NAME = 'BitsButler Scoreboard'
+const BRAND_SHORT = 'Scoreboard'
 
 /**
  * Die Anzeigetafel am Tisch.
@@ -35,7 +35,7 @@ const MARKENKUERZEL = 'Scoreboard'
  *     erreichbar — ein Bildschirm in einer Halle soll nach einem Stromausfall
  *     von selbst wieder etwas zeigen.
  *   - Mit angemeldetem Gerät und `match/U` an dieser Veranstaltung kommt
- *     unten die Zählleiste dazu (BoardZaehlleiste). Sie ist das, was die
+ *     unten die Zählleiste dazu (BoardScoreBar). Sie ist das, was die
  *     Fernbedienung war, nur als Fläche.
  *
  * Dass die Flächen fehlen, ist KEINE Sicherung — die liegt in der Anwendung,
@@ -85,18 +85,18 @@ definePageMeta({
 
 const route = useRoute()
 const eventId = String(route.params.eventId ?? '')
-const tischNummer = Number.parseInt(String(route.params.table ?? ''), 10)
-const adresse = `/api/events/${encodeURIComponent(eventId)}/tables/${tischNummer}`
+const tableNumber = Number.parseInt(String(route.params.table ?? ''), 10)
+const url = `/api/events/${encodeURIComponent(eventId)}/tables/${tableNumber}`
 
 /**
  * DER LETZTE STAND DIESES TISCHES — DAMIT EIN NEULADEN OHNE NETZ IHN FINDET.
  *
  * Seit dem 25.09.2026 übersteht ein nicht gesendeter Stand einen Netzausfall
- * (`merkposten` in useZaehlwerk.ts) — aber nur, solange die Anwendung im
+ * (`merkposten` in useScoring.ts) — aber nur, solange die Anwendung im
  * Speicher des Geräts bleibt. Ein NEULADEN ohne Netz kennt bis hierher noch
  * nicht einmal die PARTIE an diesem Tisch: die kommt aus genau dem Abruf,
  * der gerade fehlschlägt. Ohne Partie sieht `merkpostenWiederherstellen`
- * (useZaehlwerk.ts, ausgelöst über den Beobachter auf `partie.value.id`)
+ * (useScoring.ts, ausgelöst über den Beobachter auf `match.value.id`)
  * nichts, was es wiederherstellen könnte — der Schiedsrichter stünde vor
  * einer Tafel, die "kein Spiel" zeigt, während am Tisch längst weitergezählt
  * wird.
@@ -110,23 +110,23 @@ const adresse = `/api/events/${encodeURIComponent(eventId)}/tables/${tischNummer
  * herumliegt") steht hier also nichts, das auf einem herumliegenden Tablet
  * nichts verloren hätte.
  */
-function tafelSchluessel(): string {
-  return `bb.board.snapshot.${eventId}.${tischNummer}`
+function snapshotStorageKey(): string {
+  return `bb.board.snapshot.${eventId}.${tableNumber}`
 }
 
-function tafelSpeichern(wert: TableBoard) {
+function snapshotSave(value: TableBoard) {
   try {
-    window.localStorage.setItem(tafelSchluessel(), JSON.stringify(wert))
+    window.localStorage.setItem(snapshotStorageKey(), JSON.stringify(value))
   }
   catch {
     // Kein Speicher — dann eben ohne dieses Netz, wie zuvor diese Ergänzung.
   }
 }
 
-function tafelGelesen(): TableBoard | null {
+function snapshotRead(): TableBoard | null {
   try {
-    const roh = window.localStorage.getItem(tafelSchluessel())
-    return roh ? JSON.parse(roh) as TableBoard : null
+    const raw = window.localStorage.getItem(snapshotStorageKey())
+    return raw ? JSON.parse(raw) as TableBoard : null
   }
   catch {
     return null
@@ -146,7 +146,7 @@ function tafelGelesen(): TableBoard | null {
  * SCHLÄGT ER FEHL UND IST ES KEIN VERTIPPER, ist es entweder ein Backend, das
  * gerade neu startet, oder — seit dem Service Worker — ein Gerät, das ganz
  * ohne Netz neu geladen wurde. In beiden Fällen ist der zuletzt gespeicherte
- * Stand DIESES Tisches (`tafelGelesen`) die bessere Grundlage als gar keine:
+ * Stand DIESES Tisches (`snapshotRead`) die bessere Grundlage als gar keine:
  * er trägt die Partie, ohne die weder gezählt noch ein Merkposten
  * wiedergefunden werden kann. `import.meta.client`, weil es serverseitig
  * (beim gewöhnlichen SSR-Aufruf) kein `localStorage` gibt und ein
@@ -154,33 +154,33 @@ function tafelGelesen(): TableBoard | null {
  * einen Geräts.
  */
 const { data: erste } = await useAsyncData(
-  `board-${eventId}-${tischNummer}`,
+  `board-${eventId}-${tableNumber}`,
   async () => {
     try {
-      return { tafel: await $fetch<TableBoard>(adresse), unbekannt: false, ausSpeicher: false }
+      return { tafel: await $fetch<TableBoard>(url), unknownEvent: false, fromStorage: false }
     }
-    catch (fehler: unknown) {
-      const unbekannt = (fehler as { statusCode?: number }).statusCode === 404
-      const gespeichert = !unbekannt && import.meta.client ? tafelGelesen() : null
-      return { tafel: gespeichert, unbekannt, ausSpeicher: gespeichert !== null }
+    catch (error: unknown) {
+      const unknownEvent = (error as { statusCode?: number }).statusCode === 404
+      const stored = !unknownEvent && import.meta.client ? snapshotRead() : null
+      return { tafel: stored, unknownEvent, fromStorage: stored !== null }
     }
   },
 )
 
-const stand = ref<TableBoard | null>(erste.value?.tafel ?? null)
-const unbekannt = ref(erste.value?.unbekannt ?? false)
+const snapshot = ref<TableBoard | null>(erste.value?.tafel ?? null)
+const unknownEvent = ref(erste.value?.unknownEvent ?? false)
 
 /**
- * Zeigt die Tafel gerade den gespeicherten Stand aus `tafelGelesen`, und
+ * Zeigt die Tafel gerade den gespeicherten Stand aus `snapshotRead`, und
  * nicht eine Antwort, die dieses Gerät wirklich gerade bekommen hat?
  *
- * Sie hält `zuletzt` unten ausdrücklich auf `null` — der gespeicherte Stand
+ * Sie hält `lastFetch` unten ausdrücklich auf `null` — der gespeicherte Stand
  * ist per Definition nicht "gerade eben angekommen", und der
- * Verbindungspunkt (`verbindungWeg`) soll genau deshalb nach der üblichen
+ * Verbindungspunkt (`connectionLost`) soll genau deshalb nach der üblichen
  * Frist "no connection" zeigen, auch wenn oben längst wieder eine Zahl
  * steht.
  */
-const ausSpeicher = ref(erste.value?.ausSpeicher ?? false)
+const fromStorage = ref(erste.value?.fromStorage ?? false)
 
 /**
  * Wann zuletzt eine ECHTE Antwort vom Server ankam. Grundlage für den
@@ -189,19 +189,19 @@ const ausSpeicher = ref(erste.value?.ausSpeicher ?? false)
  * zwischen "es steht 5:4" und "es stand vor einer Viertelstunde 5:4".
  *
  * Bleibt `null`, solange der erste Stand aus dem Speicher kommt
- * (`ausSpeicher`) — sonst zeigte die Tafel eine soeben verstrichene Sekunde,
+ * (`fromStorage`) — sonst zeigte die Tafel eine soeben verstrichene Sekunde,
  * obwohl in Wahrheit niemand geantwortet hat.
  */
-const zuletzt = ref<number | null>(erste.value?.tafel && !ausSpeicher.value ? Date.now() : null)
-const jetzt = ref(Date.now())
+const lastFetch = ref<number | null>(erste.value?.tafel && !fromStorage.value ? Date.now() : null)
+const now = ref(Date.now())
 
 /**
- * Wann diese Seite aufgebaut wurde — die Grundlage für `verbindungWeg`,
- * solange `zuletzt` noch nie gesetzt war. Siehe dort.
+ * Wann diese Seite aufgebaut wurde — die Grundlage für `connectionLost`,
+ * solange `lastFetch` noch nie gesetzt war. Siehe dort.
  */
-const gestartet = Date.now()
+const started = Date.now()
 
-const ABSTAND_MS = 10_000
+const POLL_MS = 10_000
 
 /**
  * Die öffentliche Tafelantwort — der Stand, den jeder sieht.
@@ -212,19 +212,19 @@ const ABSTAND_MS = 10_000
  * demselben Grund wird der Fehler nicht angezeigt: er ginge die Zuschauer
  * nichts an, und beim nächsten gelungenen Abruf ist er ohnehin vorbei.
  */
-async function tafelHolen() {
+async function fetchSnapshot() {
   try {
-    stand.value = await $fetch<TableBoard>(adresse)
-    unbekannt.value = false
-    ausSpeicher.value = false
-    zuletzt.value = Date.now()
-    tafelSpeichern(stand.value)
+    snapshot.value = await $fetch<TableBoard>(url)
+    unknownEvent.value = false
+    fromStorage.value = false
+    lastFetch.value = Date.now()
+    snapshotSave(snapshot.value)
   }
-  catch (fehler: unknown) {
+  catch (error: unknown) {
     // Eine Veranstaltung, die es nicht (mehr) gibt, ist die Ausnahme: daran
     // ändert kein weiterer Versuch etwas, und sie gehört auf den Schirm.
-    if ((fehler as { statusCode?: number }).statusCode === 404 && !stand.value) {
-      unbekannt.value = true
+    if ((error as { statusCode?: number }).statusCode === 404 && !snapshot.value) {
+      unknownEvent.value = true
     }
   }
 }
@@ -244,8 +244,8 @@ async function tafelHolen() {
  * behalten — eine gescheiterte Zusatzabfrage darf die Tafel nicht aufhalten,
  * und umgekehrt genauso.
  */
-async function holen() {
-  await Promise.all([tafelHolen(), zusatzHolen()])
+async function load() {
+  await Promise.all([fetchSnapshot(), fetchExtra()])
 }
 
 /**
@@ -273,11 +273,11 @@ async function holen() {
  * Der gemerkte Tisch wird beim Wechsel VERGESSEN. Sonst spränge die Auswahl
  * sofort wieder auf denselben Tisch zurück, und der Weg führte ins Leere.
  */
-const merkschluessel = `bb.board.table.${eventId}`
+const storageKey = `bb.board.table.${eventId}`
 
-function zurueckZurWahl() {
+function backToPicker() {
   try {
-    window.localStorage.removeItem(merkschluessel)
+    window.localStorage.removeItem(storageKey)
   }
   catch {
     // Kein Speicher, nichts zu vergessen — die Auswahl kommt trotzdem.
@@ -335,7 +335,7 @@ function zurueckZurWahl() {
  * schreibt, gibt es hier nicht.
  *
  * SIE IST DER ZWEITE WEG UND NICHT DER ERSTE. Der erste ist das
- * Schiedsrichtermenü (siehe Schirimenue.vue, Abschnitt DIE SHOT-CLOCK), denn
+ * Schiedsrichtermenü (siehe RefereeMenu.vue, Abschnitt DIE SHOT-CLOCK), denn
  * am Tisch steht ein Tablet ohne Tastatur. R ist für die Hallen, in denen
  * eine Fernbedienung liegt — und dort ist sie KEIN zweites Geheimnis,
  * sondern das alte: wer zehn Jahre mit diesen Geräten gearbeitet hat, greift
@@ -360,8 +360,8 @@ function zurueckZurWahl() {
  *
  * Die Ziffern gehören im Straight Pool deshalb den Kugeln. Was das für die
  * Richtigstellung heisst, warum die Eins manchmal auf eine zweite Ziffer
- * wartet und wo die seltenen Vorgänge liegen, steht bei `spTaste` in
- * Zaehlleiste.vue — dort, wo die Lage am Tisch bekannt ist.
+ * wartet und wo die seltenen Vorgänge liegen, steht bei `spKey` in
+ * ScoreBar.vue — dort, wo die Lage am Tisch bekannt ist.
  *
  * Die 0, das R und der lange Druck bleiben davon unberührt: sie gelten an
  * jeder Tafel gleich, und ein Schiedsrichter, der zwischen zwei Disziplinen
@@ -372,11 +372,11 @@ function zurueckZurWahl() {
  * Aufnahme, und das ist genau die Bedienung, die hier durch die Kugelreihe
  * ERSETZT wird. Doppelt belegt ist damit nichts.
  */
-const menueOffen = ref(false)
+const menuOpen = ref(false)
 
 /** Wann die 0 zuletzt gedrückt wurde; siehe oben. */
-let nullZuletzt = 0
-const NULL_FENSTER_MS = 1500
+let lastZeroPress = 0
+const ZERO_WINDOW_MS = 1500
 
 /**
  * WAS VOM ZIFFERBLOCK WIRKLICH ANKOMMT.
@@ -396,7 +396,7 @@ const NULL_FENSTER_MS = 1500
  * Pfeiltasten um (danach kämen gar keine Ziffern mehr an), die zweite gibt
  * es auf den Fernbedienungen in den Hallen nicht.
  */
-function tafeltastenwert(ev: KeyboardEvent): string {
+function boardKeyValue(ev: KeyboardEvent): string {
   switch (ev.code) {
     case 'NumpadDivide': return '/'
     case 'NumpadMultiply': return '*'
@@ -408,14 +408,14 @@ function tafeltastenwert(ev: KeyboardEvent): string {
   }
 }
 
-function tafelTaste(ev: KeyboardEvent) {
+function onBoardKey(ev: KeyboardEvent) {
   // Eine Taste, die das Betriebssystem wiederholt, ist EIN Druck.
   if (ev.repeat) return
 
   // Wer tippt, obwohl es nicht geht, bekommt den Grund noch einmal zu
   // lesen — und zwar vor der Prüfung auf Eingabefelder, denn auch ein
   // Tippen ins Leere ist ein Versuch, das Gerät zu bedienen.
-  if (hindernisGrund.value) hindernisBis.value = Date.now() + MELDUNG_MS
+  if (blockedReason.value) blockedUntil.value = Date.now() + MESSAGE_MS
 
   /*
    * WER IN EIN FELD TIPPT, ZÄHLT NICHT.
@@ -432,19 +432,19 @@ function tafelTaste(ev: KeyboardEvent) {
    * existiert: der Griff hängt am document, und was dort ankommt, kann
    * überall herkommen.
    */
-  const ziel = ev.target as HTMLElement | null
-  if (ziel && (ziel.tagName === 'INPUT' || ziel.tagName === 'TEXTAREA'
-               || ziel.isContentEditable)) {
+  const target = ev.target as HTMLElement | null
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
+               || target.isContentEditable)) {
     return
   }
 
-  const taste = tafeltastenwert(ev)
+  const key = boardKeyValue(ev)
 
   /*
    * DIE GESTE IST ZWEIMAL 0 — UND ZWAR ZWEIMAL HINTEREINANDER.
    *
    * Jede andere Taste löscht den angefangenen Doppeldruck. Ohne diese Zeile
-   * ist `nullZuletzt` ein Zeitstempel, der eine Sekunde lang stehen bleibt,
+   * ist `lastZeroPress` ein Zeitstempel, der eine Sekunde lang stehen bleibt,
    * egal was dazwischen passiert: 0 · 7 · 0 in einer Sekunde klappte das
    * Schiedsrichtermenü über einer laufenden Partie auf, obwohl zwischen den
    * beiden Nullen ein Punkt gebucht wurde. Wer eine Taste drückt, die etwas
@@ -453,7 +453,7 @@ function tafelTaste(ev: KeyboardEvent) {
    * Die 0 selbst ist ausgenommen — sie IST die Geste und wird unten
    * behandelt.
    */
-  if (taste !== '0') nullZuletzt = 0
+  if (key !== '0') lastZeroPress = 0
 
   /*
    * DIE ANGEFANGENE EINGABE HAT VORRANG VOR DER 0 — UND NUR DANN.
@@ -467,8 +467,8 @@ function tafelTaste(ev: KeyboardEvent) {
    * aussteht, gehört die 0 dem Menü, und das muss auch im Straight Pool
    * erreichbar bleiben. Deshalb die Frage nach `spWartet()`.
    */
-  if (!menueOffen.value && zaehlen.value && modus.value === 'STRAIGHT_POOL'
-    && leiste.value?.spWartet() && leiste.value.spTaste(taste)) {
+  if (!menuOpen.value && canScore.value && mode.value === 'STRAIGHT_POOL'
+    && scoreBar.value?.spWaiting() && scoreBar.value.spKey(key)) {
     /*
      * UND DIE 0, DIE HIER ALS ZIFFER VERBRAUCHT WURDE, ZÄHLT NICHT FÜR DIE
      * GESTE.
@@ -484,31 +484,31 @@ function tafelTaste(ev: KeyboardEvent) {
      * Der letzte Druck war der ERSTE der Geste und öffnete trotzdem das
      * Menü über der laufenden Partie.
      */
-    nullZuletzt = 0
+    lastZeroPress = 0
     ev.preventDefault()
     return
   }
 
-  if (taste === '0') {
-    if (menueOffen.value) {
-      menueOffen.value = false
-      nullZuletzt = 0
+  if (key === '0') {
+    if (menuOpen.value) {
+      menuOpen.value = false
+      lastZeroPress = 0
     }
-    else if (Date.now() - nullZuletzt < NULL_FENSTER_MS) {
-      menueOeffnen()
-      nullZuletzt = 0
+    else if (Date.now() - lastZeroPress < ZERO_WINDOW_MS) {
+      openMenu()
+      lastZeroPress = 0
     }
     else {
-      nullZuletzt = Date.now()
+      lastZeroPress = Date.now()
     }
     ev.preventDefault()
     return
   }
 
-  if (menueOffen.value) return
-  if (!zaehlen.value) return
+  if (menuOpen.value) return
+  if (!canScore.value) return
 
-  const w = zaehlwerk
+  const w = scoring
 
   /*
    * R — DIE SHOT-CLOCK, WIE IM VORGÄNGERSYSTEM.
@@ -531,8 +531,8 @@ function tafelTaste(ev: KeyboardEvent) {
    * Gross und klein: eine Fernbedienung schickt 'R', eine Tastatur ohne
    * Feststelltaste 'r'. Beide meinen dasselbe.
    */
-  if (taste === 'r' || taste === 'R') {
-    if (shotClockOffen.value) w.shotClockBestaetigen()
+  if (key === 'r' || key === 'R') {
+    if (shotClockOpen.value) w.acknowledgeShotClock()
     ev.preventDefault()
     return
   }
@@ -541,9 +541,9 @@ function tafelTaste(ev: KeyboardEvent) {
    * SOLANGE EIN NICHT RÜCKNEHMBARER SCHREIBVORGANG UNTERWEGS IST, NIMMT DIE
    * TAFEL NICHTS AN.
    *
-   * `laeuft` ist wahr, während `beenden`, `aufgeben` oder
-   * `shotClockBestaetigen` läuft (useZaehlwerk). Jede Fläche der Leiste
-   * trägt dabei `:arbeitet="laeuft"`, ist blass und gesperrt — die
+   * `busy` ist wahr, während `finish`, `giveUp` oder
+   * `acknowledgeShotClock` läuft (useScoring). Jede Fläche der Leiste
+   * trägt dabei `:busy="busy"`, ist blass und gesperrt — die
    * Fernbedienung kam bis zum 16.09.2026 durch, und damit ging ein `7`
    * kurz nach einem `5` als Standänderung an eine Partie, die gerade
    * abgeschlossen wird.
@@ -551,16 +551,16 @@ function tafelTaste(ev: KeyboardEvent) {
    * ES STEHT VOR DER ANSTOSSFRAGE, weil auch sie schreibt und ihre beiden
    * Flächen dieselbe Sperre tragen. Die Shot-Clock lässt sich an einer
    * Partie anordnen, die noch auf den Anstoss wartet — genau dort kann
-   * `laeuft` vor dem Anstoss überhaupt wahr sein.
+   * `busy` vor dem Anstoss überhaupt wahr sein.
    *
    * DIE ANTWORT GIBT IM STRAIGHT POOL DIE LEISTE UND NICHT DIESE ZEILE.
-   * Dort hat jede Taste eine Bedeutung, und `spTaste` weist selbst ab und
-   * SAGT den Grund (`spGehtJetzt` in Zaehlleiste.vue) — das ist die Regel
+   * Dort hat jede Taste eine Bedeutung, und `spKey` weist selbst ab und
+   * SAGT den Grund (`spCanAct` in ScoreBar.vue) — das ist die Regel
    * dieser Fassung. Auf der Satztafel gibt es keine solche Zeile; dort
    * bleibt es beim Schlucken, wie bei jeder anderen Taste ohne Bedeutung
    * (`default: return` unten).
    */
-  if (zaehlwerk.laeuft.value && modus.value !== 'STRAIGHT_POOL') {
+  if (scoring.busy.value && mode.value !== 'STRAIGHT_POOL') {
     ev.preventDefault()
     return
   }
@@ -570,13 +570,13 @@ function tafelTaste(ev: KeyboardEvent) {
    * schnelle Drücke auf die 1 zweimal "links stößt an" statt einmal — die
    * zweite Taste läse noch den Zustand von vor dem ersten.
    */
-  const offen = !w.anstossStand.value.next
+  const open = !w.breakState.value.next
 
   // Solange der Anstoß offen ist, bedeuten 1 und 3 dasselbe wie im
   // whoBreaksModal des Vorbilds: links beginnt, rechts beginnt.
-  if (offen) {
-    if (taste === '1') w.anstoss(links.value)
-    else if (taste === '3') w.anstoss(rechts.value)
+  if (open) {
+    if (key === '1') w.setBreaker(left.value)
+    else if (key === '3') w.setBreaker(right.value)
     else return
     ev.preventDefault()
     return
@@ -588,7 +588,7 @@ function tafelTaste(ev: KeyboardEvent) {
    * Der Block darunter ist die Belegung der SATZTAFEL (7/9/1/3 zählen, 4/6
    * Auszeit, 5 Wechsel oder Ende). Im Straight Pool heisst jede dieser
    * Ziffern etwas anderes — sie ist die Zahl der Kugeln, die noch liegen —,
-   * und deshalb wird hier nicht ergänzt, sondern abgezweigt: `spTaste`
+   * und deshalb wird hier nicht ergänzt, sondern abgezweigt: `spKey`
    * beantwortet im Straight Pool JEDE Taste, und es fällt nichts durch.
    *
    * Das ist ausdrücklich auch die Absicherung für die anderen beiden
@@ -599,8 +599,8 @@ function tafelTaste(ev: KeyboardEvent) {
    * ist), und die kennt die Leiste besser als diese Seite — darum liegt die
    * Entscheidung dort und hier nur der Griff.
    */
-  if (modus.value === 'STRAIGHT_POOL') {
-    if (leiste.value?.spTaste(taste)) ev.preventDefault()
+  if (mode.value === 'STRAIGHT_POOL') {
+    if (scoreBar.value?.spKey(key)) ev.preventDefault()
     return
   }
 
@@ -609,8 +609,8 @@ function tafelTaste(ev: KeyboardEvent) {
    * FERNBEDIENUNG.
    *
    * Der Auftraggeber am 16.09.2026: „beim erreichen von race-to ist ende..
-   * fertig". Die Flächen der Leiste sind dann gesperrt (`zaehlsperre` in
-   * Zaehlleiste.vue); ohne diese Zeilen käme die Tastatur an ihnen vorbei,
+   * fertig". Die Flächen der Leiste sind dann gesperrt (`raceReached` in
+   * ScoreBar.vue); ohne diese Zeilen käme die Tastatur an ihnen vorbei,
    * und das ist der Weg, den auf einem Zählgerät die meisten nehmen.
    *
    * GESPERRT WIRD NUR, WAS NACH OBEN FÜHRT ODER SCHREIBT: 7/9 (+1), 4/6
@@ -621,7 +621,7 @@ function tafelTaste(ev: KeyboardEvent) {
    *   Vertipper, und wer sich vertippt hat, muss zurück können.
    *
    *   1/3 — das Minus je Seite. Es IST eine Rücknahme und keine Korrektur
-   *   (siehe `zaehlen` in useZaehlwerk): am Tisch gibt es genau zwei Wege
+   *   (siehe `canScore` in useScoring): am Tisch gibt es genau zwei Wege
    *   abwärts, und beide heissen „der Tipp davor war falsch".
    *
    *   Die 5, solange sie „ja, fertig" heisst — die Sperre führt zum Finish
@@ -633,29 +633,29 @@ function tafelTaste(ev: KeyboardEvent) {
    *
    * ES WIRD GESCHLUCKT UND NICHT GESAGT, und das ist die Regel DIESER
    * Fassung und keine Nachlässigkeit: die Satztafel hat keine Meldungszeile
-   * für Tastendrücke — `laeuft` und jede unbelegte Taste verschwinden hier
+   * für Tastendrücke — `busy` und jede unbelegte Taste verschwinden hier
    * ebenso wortlos (`default: return`). Im Straight Pool ist es umgekehrt,
-   * dort beantwortet `spGehtJetzt` jede Taste mit einem Grund; dort gibt es
+   * dort beantwortet `spCanAct` jede Taste mit einem Grund; dort gibt es
    * die Zeile auch. Eine halbe Meldung an einer Stelle, die keine hat,
    * stünde entweder über den Namen der Spieler oder gar nicht.
    */
-  const zuEnde = zaehlwerk.distanzErreicht.value
+  const raceOver = scoring.distanceReached.value
 
-  switch (taste) {
-    case '7': if (zuEnde) return; w.zaehlen('A', 1); break
-    case '1': w.zaehlen('A', -1); break
-    case '9': if (zuEnde) return; w.zaehlen('B', 1); break
-    case '3': w.zaehlen('B', -1); break
-    case '4': if (zuEnde) return; w.auszeit('A', !!auszeiten.value.A); break
-    case '6': if (zuEnde) return; w.auszeit('B', !!auszeiten.value.B); break
-    case '*': w.zurueck(); break
+  switch (key) {
+    case '7': if (raceOver) return; w.count('A', 1); break
+    case '1': w.count('A', -1); break
+    case '9': if (raceOver) return; w.count('B', 1); break
+    case '3': w.count('B', -1); break
+    case '4': if (raceOver) return; w.takeTimeout('A', !!timeoutClocks.value.A); break
+    case '6': if (raceOver) return; w.takeTimeout('B', !!timeoutClocks.value.B); break
+    case '*': w.performUndo(); break
     /*
      * + UND − ÖFFNEN DEN ZIFFERBLOCK FÜR EINE GANZE AUFNAHME — UND ZWAR NUR
      * IN DER PUNKTFASSUNG.
      *
      * Im Straight Pool waren sie bis zum 16.09.2026 Rack und Safety, und das
      * sind sie weiterhin — nur steht es jetzt bei den Kugeln, wo es hingehört
-     * (`spTaste` in Zaehlleiste.vue). Hierher kommt der Straight Pool nicht
+     * (`spKey` in ScoreBar.vue). Hierher kommt der Straight Pool nicht
      * mehr, siehe die Abzweigung oben.
      *
      * IN DER SATZWERTUNG SIND SIE SEIT DEM 16.09.2026 TOT, und das ist die
@@ -667,7 +667,7 @@ function tafelTaste(ev: KeyboardEvent) {
      * sondern eine kaputte Partie.
      *
      * Eine Fläche dafür gab es in der Satzfassung nie: die „+ N"-Kacheln
-     * stehen unter `v-if="modus === 'POINT_RACE'"`, und auch die Übersicht
+     * stehen unter `v-if="mode === 'POINT_RACE'"`, und auch die Übersicht
      * im Schiedsrichtermenü nennt `+ · −` nur in der Punktfassung. Der
      * Zifferblock war in der Satzwertung also ein Weg, den niemand kennt
      * und den nichts beschreibt — die falsche Hälfte der Wahl zwischen
@@ -677,16 +677,16 @@ function tafelTaste(ev: KeyboardEvent) {
      * Tastenpaare für denselben Vorgang sind auf einer Fernbedienung, die
      * im Stehen bedient wird, nur eine Verwechslung mehr. Sie fallen auf
      * `default: return` und tun nichts — wie jede andere unbelegte Taste
-     * der Satztafel auch. Die zweite Sperre sitzt in `blockOeffnen` selbst
-     * (Zaehlleiste.vue), damit der Block auch über die Fläche nicht in die
+     * der Satztafel auch. Die zweite Sperre sitzt in `blockOpen` selbst
+     * (ScoreBar.vue), damit der Block auch über die Fläche nicht in die
      * falsche Fassung geraten kann.
      */
     case '+':
-      if (modus.value === 'POINT_RACE') leiste.value?.blockOeffnen(links.value, 1)
+      if (mode.value === 'POINT_RACE') scoreBar.value?.blockOpen(left.value, 1)
       else return
       break
     case '-':
-      if (modus.value === 'POINT_RACE') leiste.value?.blockOeffnen(rechts.value, 1)
+      if (mode.value === 'POINT_RACE') scoreBar.value?.blockOpen(right.value, 1)
       else return
       break
     /*
@@ -698,12 +698,12 @@ function tafelTaste(ev: KeyboardEvent) {
      * dort die Zahl der Kugeln, die noch liegen.
      */
     case '5':
-      if (sieger.value) w.beenden()
+      if (winner.value) w.finish()
       // Der Tischwechsel ist nach der Distanz keine Regel mehr, sondern nur
-      // noch eine Schreibbewegung. `zuEnde` und nicht `sieger`: stehen beide
-      // auf der Distanz, ist `sieger` leer, und dann erst recht Schluss.
-      else if (modus.value === 'POINT_RACE' && !zuEnde) {
-        w.anstoss(w.anstossStand.value.next === 'A' ? 'B' : 'A')
+      // noch eine Schreibbewegung. `raceOver` und nicht `winner`: stehen beide
+      // auf der Distanz, ist `winner` leer, und dann erst recht Schluss.
+      else if (mode.value === 'POINT_RACE' && !raceOver) {
+        w.setBreaker(w.breakState.value.next === 'A' ? 'B' : 'A')
       }
       break
     default: return
@@ -725,20 +725,20 @@ function tafelTaste(ev: KeyboardEvent) {
  * der Zuschlag. Auf einem Bildschirm an der Wand, der nie gezählt hat, ist
  * sie der ganze Schutz: dort führt der lange Druck weiter geradewegs zur
  * Tischwahl, weil es nichts gibt, worüber ein Menü etwas sagen könnte
- * (siehe menueOeffnen).
+ * (siehe openMenu).
  */
-let druckUhr: ReturnType<typeof setTimeout> | null = null
-const DRUCK_MS = 2000
+let pressTimer: ReturnType<typeof setTimeout> | null = null
+const PRESS_MS = 2000
 
-function druckAn() {
-  if (druckUhr) clearTimeout(druckUhr)
-  if (menueOffen.value) return
-  druckUhr = setTimeout(menueOeffnen, DRUCK_MS)
+function pressStart() {
+  if (pressTimer) clearTimeout(pressTimer)
+  if (menuOpen.value) return
+  pressTimer = setTimeout(openMenu, PRESS_MS)
 }
 
-function druckAus() {
-  if (druckUhr) clearTimeout(druckUhr)
-  druckUhr = null
+function pressEnd() {
+  if (pressTimer) clearTimeout(pressTimer)
+  pressTimer = null
 }
 
 /**
@@ -774,7 +774,7 @@ function druckAus() {
  * erst, wenn sie getippt sind — ein Code sagt vorher nichts über seinen
  * Träger, und ihn vorab beim Server zu erfragen wäre ein Umlauf für eine
  * Auskunft, die mit der Tat ohnehin kommt. Reicht er nicht, steht es
- * danach da: `FORFEIT_IS_THE_TOURNAMENT_DIRECTION` (useZaehlwerk) sagt,
+ * danach da: `FORFEIT_IS_THE_TOURNAMENT_DIRECTION` (useScoring) sagt,
  * dass der Code angekommen ist und wessen hier zählt — und nicht bloss
  * „nicht erlaubt".
  *
@@ -788,9 +788,9 @@ function druckAus() {
  * Tisch. An diesen Bildschirm kommt er damit gar nicht erst: er bekommt
  * keinen Personencode (`identity.acts_at_event`).
  */
-function menueOeffnen() {
-  if (zaehlen.value && partie.value) {
-    menueOffen.value = true
+function openMenu() {
+  if (canScore.value && match.value) {
+    menuOpen.value = true
     return
   }
   /*
@@ -812,60 +812,60 @@ function menueOeffnen() {
    * erreichbar ist nicht mehr das Ziel, sondern die GESTE — zweimal 0 oder
    * zwei Sekunden Druck, und das gilt hier wie dort.
    */
-  zurueckZurWahl()
+  backToPicker()
 }
 
-let uhr: ReturnType<typeof setInterval> | null = null
-let sekundenzeiger: ReturnType<typeof setInterval> | null = null
+let pollTimer: ReturnType<typeof setInterval> | null = null
+let tickTimer: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   // VOR dem ersten Abruf: davon hängt ab, ob der überhaupt die zweite Frage
   // stellt. Sonst bliebe die Leiste bis zum zweiten Takt aus.
-  merkerLesen()
-  if (!stand.value && !unbekannt.value) holen()
-  else zusatzHolen()
-  uhr = setInterval(holen, ABSTAND_MS)
+  storeRead()
+  if (!snapshot.value && !unknownEvent.value) load()
+  else fetchExtra()
+  pollTimer = setInterval(load, POLL_MS)
   // Der erste Stand kann schon Sponsoren mitbringen (Serverseite); dann
   // läuft das Karussell ab dem Einschalten und nicht erst ab dem zweiten
   // Abruf. Der Beobachter oben sieht diesen ersten Stand nicht, weil er
   // sich nicht mehr ändert.
-  sponsorUhrStellen()
+  scheduleSponsorTimer()
   // Der Sekundentakt treibt nur die Auszeit-Uhr und den Verbindungspunkt.
   // Ohne ihn spränge die Restzeit einer Auszeit in Zehnersprüngen, und eine
   // Uhr, die springt, ist schlechter als gar keine.
-  sekundenzeiger = setInterval(() => (jetzt.value = Date.now()), 1000)
-  window.addEventListener('keydown', tafelTaste)
+  tickTimer = setInterval(() => (now.value = Date.now()), 1000)
+  window.addEventListener('keydown', onBoardKey)
 })
 
 onBeforeUnmount(() => {
-  if (uhr) clearInterval(uhr)
-  if (sekundenzeiger) clearInterval(sekundenzeiger)
-  if (sponsorUhr) clearTimeout(sponsorUhr)
-  if (druckUhr) clearTimeout(druckUhr)
-  window.removeEventListener('keydown', tafelTaste)
+  if (pollTimer) clearInterval(pollTimer)
+  if (tickTimer) clearInterval(tickTimer)
+  if (sponsorTimer) clearTimeout(sponsorTimer)
+  if (pressTimer) clearTimeout(pressTimer)
+  window.removeEventListener('keydown', onBoardKey)
 })
 
-const partie = computed(() => stand.value?.match ?? null)
+const match = computed(() => snapshot.value?.match ?? null)
 
 /**
  * Sekunden seit dem letzten ECHTEN Abruf — die Grundlage für "die Anzeige
  * steht".
  *
- * GERECHNET AB `zuletzt`, UND SOLANGE DAS NOCH NIE GESETZT WAR, AB
- * `gestartet` — seit es einen Service Worker gibt, kann diese Seite OHNE
- * JEDE erfolgreiche Antwort starten (siehe `tafelGelesen` oben): ohne diesen
- * Rückfall bliebe `alter` für immer `null` und der Verbindungspunkt unten
+ * GERECHNET AB `lastFetch`, UND SOLANGE DAS NOCH NIE GESETZT WAR, AB
+ * `started` — seit es einen Service Worker gibt, kann diese Seite OHNE
+ * JEDE erfolgreiche Antwort starten (siehe `snapshotRead` oben): ohne diesen
+ * Rückfall bliebe `age` für immer `null` und der Verbindungspunkt unten
  * für immer stumm, obwohl seit dem Einschalten kein einziger Abruf gelungen
  * ist. Vorher konnte dieser Fall gar nicht eintreten: ohne Netz lud die
  * Seite selbst nicht, also lief dieser Code nie mit leeren Händen los.
  */
-const alter = computed(() => Math.floor((jetzt.value - (zuletzt.value ?? gestartet)) / 1000))
+const age = computed(() => Math.floor((now.value - (lastFetch.value ?? started)) / 1000))
 
 /**
  * Erst nach dem dritten verpassten Abruf. Ein einzelner Aussetzer ist normal
  * und soll nicht blinken; eine halbe Minute Stille ist es nicht.
  */
-const verbindungWeg = computed(() => alter.value > (ABSTAND_MS / 1000) * 3)
+const connectionLost = computed(() => age.value > (POLL_MS / 1000) * 3)
 
 /**
  * DIE AUSZEIT-UHREN — eine je Spieler, und beide dürfen nebeneinander laufen.
@@ -890,16 +890,16 @@ const verbindungWeg = computed(() => alter.value > (ABSTAND_MS / 1000) * 3)
  * oder Nein.
  *
  * Sie geht ins Zählwerk und entscheidet dort, wann ein Vorgriff losgelassen
- * wird. Deshalb darf sie NICHT aus `auszeiten` unten kommen: die trägt den
+ * wird. Deshalb darf sie NICHT aus `timeoutClocks` unten kommen: die trägt den
  * Vorgriff schon, und ein Vorgriff, der sich selbst bestätigt, wird nie
  * wieder los.
  */
-const auszeitenLaufen = computed<Record<Seite, boolean>>(() => {
-  const laeuft: Record<Seite, boolean> = { A: false, B: false }
-  for (const t of stand.value?.timeouts ?? []) {
-    if (!t.stale) laeuft[t.side] = true
+const timeoutsRunning = computed<Record<Side, boolean>>(() => {
+  const running: Record<Side, boolean> = { A: false, B: false }
+  for (const t of snapshot.value?.timeouts ?? []) {
+    if (!t.stale) running[t.side] = true
   }
-  return laeuft
+  return running
 })
 
 /**
@@ -912,17 +912,17 @@ const auszeitenLaufen = computed<Record<Seite, boolean>>(() => {
  *
  * Ein Vorgriff wird NICHT gegen den Abruf verrechnet, sondern ersetzt ihn,
  * solange er lebt. Das ist der Kern der Sache — siehe `auszeitVorgriff` in
- * useZaehlwerk.ts: beide Uhren laufen gleich schnell und stehen um die
+ * useScoring.ts: beide Uhren laufen gleich schnell und stehen um die
  * Laufzeit der Leitung auseinander, und wer mittendrin umschaltet, dreht
  * die Uhr vor Publikum um diesen Versatz zurück.
  */
-const auszeiten = computed(() => {
-  const seit = zuletzt.value === null ? 0 : Math.floor((jetzt.value - zuletzt.value) / 1000)
-  const offen: Partial<Record<'A' | 'B', { text: string, ueberzogen: boolean }>> = {}
-  const vorgriff = zaehlwerk.auszeitVorgriff.value
-  const dauer = auskunft.value?.match?.timeoutSeconds ?? null
+const timeoutClocks = computed(() => {
+  const since = lastFetch.value === null ? 0 : Math.floor((now.value - lastFetch.value) / 1000)
+  const open: Partial<Record<'A' | 'B', { text: string, overrun: boolean }>> = {}
+  const optimistic = scoring.timeoutOptimistic.value
+  const duration = info.value?.match?.timeoutSeconds ?? null
 
-  for (const t of stand.value?.timeouts ?? []) {
+  for (const t of snapshot.value?.timeouts ?? []) {
     // `stale` heisst: länger als einen Tag, das hat jemand vergessen zu
     // beenden. Eine sechsstellige Zahl im Saal sagt nichts.
     if (t.stale) continue
@@ -935,13 +935,13 @@ const auszeiten = computed(() => {
      * heute gar nicht erst gesetzt (siehe `auszeit`); sollte er es doch
      * einmal, tritt er hier zur Seite, statt das Loch zu reissen.
      */
-    const v = vorgriff[t.side]
-    if (v && (v.anker === null || dauer !== null)) continue
+    const v = optimistic[t.side]
+    if (v && (v.anchor === null || duration !== null)) continue
 
-    const rest = Math.max(0, t.remainingSeconds - seit)
-    const ueber = rest > 0 ? 0 : t.overrunSeconds + Math.max(0, seit - t.remainingSeconds)
+    const remaining = Math.max(0, t.remainingSeconds - since)
+    const over = remaining > 0 ? 0 : t.overrunSeconds + Math.max(0, since - t.remainingSeconds)
 
-    offen[t.side] = { text: uhrzeit(rest > 0 ? rest : ueber), ueberzogen: rest === 0 }
+    open[t.side] = { text: formatClock(remaining > 0 ? remaining : over), overrun: remaining === 0 }
   }
 
   /*
@@ -953,35 +953,35 @@ const auszeiten = computed(() => {
    * Beginn nicht vorweg, und eine Uhr ohne Länge wäre eine erfundene
    * Restzeit.
    */
-  for (const seite of ['A', 'B'] as Seite[]) {
-    const v = vorgriff[seite]
-    if (!v || v.anker === null || dauer === null) continue
+  for (const side of ['A', 'B'] as Side[]) {
+    const v = optimistic[side]
+    if (!v || v.anchor === null || duration === null) continue
 
-    const verstrichen = Math.max(0, Math.floor((jetzt.value - v.anker) / 1000))
-    const rest = Math.max(0, dauer - verstrichen)
-    offen[seite] = {
-      text: uhrzeit(rest > 0 ? rest : verstrichen - dauer),
-      ueberzogen: rest === 0,
+    const elapsed = Math.max(0, Math.floor((now.value - v.anchor) / 1000))
+    const remaining = Math.max(0, duration - elapsed)
+    open[side] = {
+      text: formatClock(remaining > 0 ? remaining : elapsed - duration),
+      overrun: remaining === 0,
     }
   }
-  return offen
+  return open
 })
 
-function uhrzeit(sekunden: number): string {
+function formatClock(sekunden: number): string {
   const m = Math.floor(sekunden / 60)
   const s = sekunden % 60
   return `${m}:${String(s).padStart(2, '0')}`
 }
 
 /**
- * DIE ZEITLIMIT-UHR (HEYBALL) — dieselbe Bauart wie `auszeiten` oben und aus
+ * DIE ZEITLIMIT-UHR (HEYBALL) — dieselbe Bauart wie `timeoutClocks` oben und aus
  * demselben Grund.
  *
  * Der Abruf nennt Restzeit, Überzug und `running` im Moment, in dem er
  * antwortet; hier wird die seither verstrichene Zeit abgezogen, solange die
  * Uhr LÄUFT. Steht sie (`running === false`), wird nichts abgezogen — genau
  * das ist der Unterschied zur Shot-Clock, die diese Tafel bewusst OHNE
- * Sekunden zeigt (siehe `shotClockOffen`): dort führt der Schiedsrichter
+ * Sekunden zeigt (siehe `shotClockOpen`): dort führt der Schiedsrichter
  * seine eigene Stoppuhr, hier ist die Uhr selbst eine anhaltbare Spieluhr
  * (Schachuhr-Bauart, siehe `competition.match_time_limit_state`) und ihr
  * Stand zwischen zwei Abrufen genauso vorhersagbar wie bei einer Auszeit.
@@ -991,19 +991,19 @@ function uhrzeit(sekunden: number): string {
  * Restzeit wäre schlimmer als keine, und die Anwendung liefert dafür schon
  * `timeLimit: null` (siehe `competition.match_time_limit_state`).
  */
-const zeitlimit = computed(() => {
-  const tl = stand.value?.timeLimit
+const timeLimit = computed(() => {
+  const tl = snapshot.value?.timeLimit
   if (!tl) return null
 
-  const seit = tl.running && zuletzt.value !== null
-    ? Math.floor((jetzt.value - zuletzt.value) / 1000)
+  const since = tl.running && lastFetch.value !== null
+    ? Math.floor((now.value - lastFetch.value) / 1000)
     : 0
-  const rest = Math.max(0, tl.remainingSeconds - seit)
-  const ueber = rest > 0 ? 0 : tl.overrunSeconds + Math.max(0, seit - tl.remainingSeconds)
+  const remaining = Math.max(0, tl.remainingSeconds - since)
+  const over = remaining > 0 ? 0 : tl.overrunSeconds + Math.max(0, since - tl.remainingSeconds)
 
   return {
-    text: uhrzeit(rest > 0 ? rest : ueber),
-    ueberzogen: rest === 0,
+    text: formatClock(remaining > 0 ? remaining : over),
+    overrun: remaining === 0,
     running: tl.running,
   }
 })
@@ -1036,13 +1036,13 @@ const zeitlimit = computed(() => {
  * angemeldet ist, der die Partie lesen darf. Beides entscheidet der
  * Server, und beides lässt sich am Gerät nicht behaupten.
  */
-const spiegelSchluessel = `bb.board.mirror.${eventId}`
+const mirrorStorageKey = `bb.board.mirror.${eventId}`
 
-const gespiegelt = ref(false)
+const mirrored = ref(false)
 
-function merkerLesen() {
+function storeRead() {
   try {
-    gespiegelt.value = window.localStorage.getItem(spiegelSchluessel) === '1'
+    mirrored.value = window.localStorage.getItem(mirrorStorageKey) === '1'
   }
   catch {
     // Privater Modus: dann hängt der Schirm eben herum wie geliefert. Eine
@@ -1051,7 +1051,7 @@ function merkerLesen() {
 }
 
 /** Was die Durchreiche über die Partie am Tisch weiß — siehe server/api/board. */
-interface Zaehlauskunft {
+interface ScoringInfo {
   /**
    * WIE an diesem Schirm gehandelt wird — vom Server gesagt, nicht geraten.
    *
@@ -1069,19 +1069,19 @@ interface Zaehlauskunft {
   /** Dieses Gerät hält eine gültige Freigabe für genau diesen Tisch. */
   released: boolean
   mayScore: boolean
-  match: Zusatz | null
+  match: Extra | null
   /**
    * Die Bau-Kennung des Servers, der geantwortet hat.
    *
    * Sie fährt in dieser Antwort mit, weil die Tafel sie ohnehin alle zehn
-   * Sekunden holt — siehe useFassungswechsel.ts, dort steht die ganze
+   * Sekunden holt — siehe useVersionSwitch.ts, dort steht die ganze
    * Begründung. `undefined` bei einem Server, der älter ist als diese
    * Angabe; dann geschieht nichts, und das ist richtig.
    */
   buildId?: string
 }
 
-const auskunft = ref<Zaehlauskunft | null>(null)
+const info = ref<ScoringInfo | null>(null)
 
 /**
  * Gefragt wird IMMER, und nicht mehr nur bei gesetztem Merker.
@@ -1093,13 +1093,13 @@ const auskunft = ref<Zaehlauskunft | null>(null)
  * den er vorher nicht hatte; dafür kann er sich das Zählen nicht mehr
  * selbst zusprechen.
  */
-async function zusatzHolen() {
+async function fetchExtra() {
   try {
-    auskunft.value = await $fetch<Zaehlauskunft>(
-      `/api/board/${encodeURIComponent(eventId)}/tables/${tischNummer}`)
+    info.value = await $fetch<ScoringInfo>(
+      `/api/board/${encodeURIComponent(eventId)}/tables/${tableNumber}`)
     // Die Bau-Kennung ist mitgekommen; ob daraus etwas folgt, entscheidet
-    // `fassung` — und der Augenblick dafür ist `darfNachladen` weiter unten.
-    fassung.melden(auskunft.value?.buildId)
+    // `versionSwitch` — und der Augenblick dafür ist `canReload` weiter unten.
+    versionSwitch.report(info.value?.buildId)
   }
   catch {
     /*
@@ -1118,8 +1118,8 @@ async function zusatzHolen() {
  * es hakt, sagt die Zeile darunter — „wo ist der Knopf hin" ist eine
  * schlechtere Auskunft als „der geht hier nicht, weil …".
  */
-const zaehlen = computed(() =>
-  auskunft.value?.mayScore === true && !!partie.value)
+const canScore = computed(() =>
+  info.value?.mayScore === true && !!match.value)
 
 /**
  * Wo es hakt — aber nur für den, der es beheben kann.
@@ -1139,9 +1139,9 @@ const zaehlen = computed(() =>
  * leer, und das ist richtig: das Gerät zählt über seine Freigabe, und die
  * Rechte eines Kontos gehen es nichts an.
  */
-const hindernisGrund = computed(() => {
-  if (auskunft.value === null) return ''
-  if (auskunft.value.actingAs === 'PERSON' && !auskunft.value.mayScore) {
+const blockedReason = computed(() => {
+  if (info.value === null) return ''
+  if (info.value.actingAs === 'PERSON' && !info.value.mayScore) {
     return 'This account may not score at this event.'
   }
   return ''
@@ -1157,7 +1157,7 @@ const hindernisGrund = computed(() => {
  * Halbfinale, in einer Sprache, die dort niemanden angeht.
  *
  * EINE MINUTE UND NICHT DIE FÜNFZEHN SEKUNDEN DES ZÄHLWERKS.
- * Das Vorbild ist FEHLER_MS in useZaehlwerk.ts (14.09.2026, „ist ja nur ein
+ * Das Vorbild ist FEHLER_MS in useScoring.ts (14.09.2026, „ist ja nur ein
  * hinweis fuer den moment"). Die Frist ist übernommen, die ZAHL nicht, und
  * der Unterschied ist, wer gerade hinsieht: eine Abweisung im Zählwerk
  * beantwortet den Druck, den jemand eben gemacht hat — er schaut schon auf
@@ -1175,16 +1175,16 @@ const hindernisGrund = computed(() => {
  * Sie kommt wieder, wenn jemand eine Taste drückt: wer am Gerät tippt und
  * nichts passieren sieht, bekommt in demselben Augenblick den Grund dazu.
  */
-const MELDUNG_MS = 60_000
-const hindernisBis = ref(0)
+const MESSAGE_MS = 60_000
+const blockedUntil = ref(0)
 
-watch(hindernisGrund, (neu, alt) => {
-  if (neu && neu !== alt) hindernisBis.value = Date.now() + MELDUNG_MS
+watch(blockedReason, (neu, alt) => {
+  if (neu && neu !== alt) blockedUntil.value = Date.now() + MESSAGE_MS
 }, { immediate: true })
 
-/** Der Satz, solange seine Frist läuft. `jetzt` tickt im Sekundentakt. */
-const zaehlHindernis = computed(() =>
-  hindernisGrund.value && jetzt.value < hindernisBis.value ? hindernisGrund.value : '')
+/** Der Satz, solange seine Frist läuft. `now` tickt im Sekundentakt. */
+const scoringBlocked = computed(() =>
+  blockedReason.value && now.value < blockedUntil.value ? blockedReason.value : '')
 
 /**
  * SATZWERTUNG ODER PUNKTWERTUNG — aus `sport.discipline` und nicht aus einer
@@ -1213,8 +1213,8 @@ const zaehlHindernis = computed(() =>
  * Tastenbelegung der Satzfassung. Jetzt trägt `competition.public_match`
  * beides an der Partie, und die öffentliche Tafelantwort braucht kein Recht.
  */
-const modus = computed<'RACK_RACE' | 'POINT_RACE' | 'STRAIGHT_POOL'>(() => {
-  const spielart = partie.value?.discipline
+const mode = computed<'RACK_RACE' | 'POINT_RACE' | 'STRAIGHT_POOL'>(() => {
+  const gameType = match.value?.discipline
   /*
    * 14.1 ENDLOS BEKOMMT SEINE EIGENE FASSUNG — UND ZWAR AM SCHLÜSSEL DER
    * DISZIPLIN, NICHT AN IHRER WERTUNGSART.
@@ -1225,25 +1225,25 @@ const modus = computed<'RACK_RACE' | 'POINT_RACE' | 'STRAIGHT_POOL'>(() => {
    * und eine Foulfolge; ein Shoot-out hat nichts davon. Bis zum 16.09.2026
    * bekamen beide dieselbe Leiste, und für eine der beiden war sie falsch.
    */
-  if (spielart?.key === 'POOL_14_1') return 'STRAIGHT_POOL'
-  return spielart?.scoringKind === 'POINT_RACE' ? 'POINT_RACE' : 'RACK_RACE'
+  if (gameType?.key === 'POOL_14_1') return 'STRAIGHT_POOL'
+  return gameType?.scoringKind === 'POINT_RACE' ? 'POINT_RACE' : 'RACK_RACE'
 })
 
 /**
  * TRAEGT DIESE PARTIE EIN SATZFORMAT — seit dem 25.09.2026.
  *
  * `Match.setRaceTo` ist gesetzt: "best of 5, je race to 5". Sie entscheidet
- * in `useZaehlwerk`, gegen welche Spalte gezaehlt wird (`set_score` statt
+ * in `useScoring`, gegen welche Spalte gezaehlt wird (`set_score` statt
  * `score`), und hier, ob der Zifferblock den AUSSENSTAND optimistisch
- * ueberschreiben darf (`tafelseite`) — bei Saetzen zeigt die grosse Zahl die
+ * ueberschreiben darf (`boardSide`) — bei Saetzen zeigt die grosse Zahl die
  * gewonnenen Saetze, und die aendert sich nicht mit jedem Rack.
  *
  * BEI SNOOKER (FRAME_RACE) BLEIBT SIE FALSCH — `setRaceTo` ist dort immer
  * `null` (siehe die Begruendung an `Match.setRaceTo`). Ein Frame hat keinen
- * Zwischenstand, den die Verwaltung fuehrt; siehe `istSnooker` und die
+ * Zwischenstand, den die Verwaltung fuehrt; siehe `isSnooker` und die
  * Ballwerte-Flaeche weiter unten.
  */
-const satzformat = computed(() => (partie.value?.setRaceTo ?? null) !== null)
+const setFormat = computed(() => (match.value?.setRaceTo ?? null) !== null)
 
 /**
  * SNOOKER — die Wertungsart, fuer die es weder Racks noch eine Zielzahl
@@ -1253,28 +1253,28 @@ const satzformat = computed(() => (partie.value?.setRaceTo ?? null) !== null)
  * "+1"-Flaechen schreiben ohne Satzformat DIREKT nach `match_slot.score` —
  * bei Snooker waere das der AUSSENSTAND (gewonnene Frames), und ein Tipp
  * darauf schriebe der Partie ein Frame gut, das niemand bestaetigt hat.
- * Die Ballwerte-Flaeche (`BoardBallwerte`) tritt deshalb an ihre Stelle: sie
+ * Die Ballwerte-Flaeche (`BoardBallValues`) tritt deshalb an ihre Stelle: sie
  * zaehlt die laufenden Punkte eines Frames rein im Geraet und schickt
  * nichts an die Verwaltung, bis der Schiedsrichter das Frame im
  * Schiedsrichtermenue ausdruecklich abschliesst (`confirm-set` mit
  * genanntem Gewinner).
  */
-const istSnooker = computed(() => partie.value?.discipline.scoringKind === 'FRAME_RACE')
+const isSnooker = computed(() => match.value?.discipline.scoringKind === 'FRAME_RACE')
 
-const zaehlwerk = useZaehlwerk({
-  partie: computed(() => partie.value),
+const scoring = useScoring({
+  match: computed(() => match.value),
   // Der ROHE Zusatz, so wie der Abruf ihn liefert. Das Zählwerk braucht ihn
   // ungeschönt: es entscheidet daran, wann es seinen eigenen Vorgriff
   // loslässt, und ein Vorgriff, den man ihm zurückreicht, bestätigt sich
   // selbst. Was die Oberfläche zeigt, steht eine Zeile tiefer.
-  zusatz: computed(() => auskunft.value?.match ?? null),
-  auszeitenLaufen,
+  extra: computed(() => info.value?.match ?? null),
+  timeoutsRunning: timeoutsRunning,
   // NUR 14.1 endlos und nicht jede Punktwertung: das Shoot-out hat keine
   // Restkugeln, und ein Rückgängig, das ihm welche schriebe, trüge eine
   // Angabe in eine Partie, zu der sie nicht gehört.
-  straightPool: computed(() => modus.value === 'STRAIGHT_POOL'),
-  satzformat,
-  nachschauen: holen,
+  straightPool: computed(() => mode.value === 'STRAIGHT_POOL'),
+  setFormat: setFormat,
+  refresh: load,
 })
 
 /* ------------------------------------------------------------------------
@@ -1294,7 +1294,7 @@ const zaehlwerk = useZaehlwerk({
  * erst der AUSSENSTAND, sobald das Schiedsrichtermenue das Frame
  * abschliesst.
  */
-const frameStand = ref<Standpaar>({ A: 0, B: 0 })
+const frameScore = ref<ScorePair>({ A: 0, B: 0 })
 /**
  * Die laufende Framenummer — ebenfalls nur im Geraet gefuehrt.
  *
@@ -1302,9 +1302,9 @@ const frameStand = ref<Standpaar>({ A: 0, B: 0 })
  * obwohl `competition.match.current_set_no` bei jedem Frame weiterzaehlt.
  * Diese Zahl beginnt deshalb bei 1 und zaehlt lokal mit — richtig fuer die
  * laufende Sitzung an diesem Tablet, aber falsch nach einem Neuladen mitten
- * im Turnier. Siehe denselben Vorbehalt wie bei `frameStand`.
+ * im Turnier. Siehe denselben Vorbehalt wie bei `frameScore`.
  */
-const frameNummer = ref(1)
+const frameNumber = ref(1)
 
 /**
  * Der letzte lokale Eintrag am laufenden Frame — fuer ein einfaches Undo.
@@ -1316,37 +1316,37 @@ const frameNummer = ref(1)
  * abziehen, den richtigen dazu), denn der Stand ist ohnehin nur eine
  * Gedaechtnisstuetze und keine Wahrheit, die irgendwo nachgelesen wird.
  */
-const frameLetzter = ref<{ seite: Seite, betrag: number } | null>(null)
+const lastFrameEntry = ref<{ side: Side, amount: number } | null>(null)
 
-watch(() => partie.value?.id ?? null, (neu, alt) => {
+watch(() => match.value?.id ?? null, (neu, alt) => {
   if (neu === alt) return
-  frameStand.value = { A: 0, B: 0 }
-  frameNummer.value = 1
-  frameLetzter.value = null
+  frameScore.value = { A: 0, B: 0 }
+  frameNumber.value = 1
+  lastFrameEntry.value = null
 })
 
 /** Ein Ball ist gefallen — die Punkte gehen an den, der ihn versenkt hat. */
-function frameBall(seite: Seite, wert: number) {
-  frameStand.value = { ...frameStand.value, [seite]: frameStand.value[seite] + wert }
-  frameLetzter.value = { seite, betrag: wert }
+function frameBall(side: Side, value: number) {
+  frameScore.value = { ...frameScore.value, [side]: frameScore.value[side] + value }
+  lastFrameEntry.value = { side, amount: value }
 }
 
 /** Ein Foul — die Punkte gehen an den GEGNER dessen, der gefoult hat. */
-function frameFoul(verursacher: Seite, punkte: number) {
-  const gegner: Seite = verursacher === 'A' ? 'B' : 'A'
-  frameStand.value = { ...frameStand.value, [gegner]: frameStand.value[gegner] + punkte }
-  frameLetzter.value = { seite: gegner, betrag: punkte }
+function frameFoul(fouler: Side, points: number) {
+  const opponent: Side = fouler === 'A' ? 'B' : 'A'
+  frameScore.value = { ...frameScore.value, [opponent]: frameScore.value[opponent] + points }
+  lastFrameEntry.value = { side: opponent, amount: points }
 }
 
-/** Den letzten lokalen Eintrag zurücknehmen — siehe `frameLetzter`. */
-function frameZurueck() {
-  const letzter = frameLetzter.value
-  if (!letzter) return
-  frameStand.value = {
-    ...frameStand.value,
-    [letzter.seite]: Math.max(0, frameStand.value[letzter.seite] - letzter.betrag),
+/** Den letzten lokalen Eintrag zurücknehmen — siehe `lastFrameEntry`. */
+function undoFrame() {
+  const lastEntry = lastFrameEntry.value
+  if (!lastEntry) return
+  frameScore.value = {
+    ...frameScore.value,
+    [lastEntry.side]: Math.max(0, frameScore.value[lastEntry.side] - lastEntry.amount),
   }
-  frameLetzter.value = null
+  lastFrameEntry.value = null
 }
 
 /**
@@ -1357,12 +1357,12 @@ function frameZurueck() {
  * Ruecksetzen dort wuerde einen Punktestand loeschen, den die Verwaltung gar
  * nicht bestaetigt hat.
  */
-async function satzAbschliessenGeklickt(winner?: Seite) {
-  const ergebnis = await zaehlwerk.satzAbschliessen(winner)
-  if (ergebnis && istSnooker.value) {
-    frameStand.value = { A: 0, B: 0 }
-    frameNummer.value += 1
-    frameLetzter.value = null
+async function finishSetClicked(winner?: Side) {
+  const result = await scoring.finishSet(winner)
+  if (result && isSnooker.value) {
+    frameScore.value = { A: 0, B: 0 }
+    frameNumber.value += 1
+    lastFrameEntry.value = null
   }
 }
 
@@ -1373,7 +1373,7 @@ async function satzAbschliessenGeklickt(winner?: Seite) {
  * aktualisieren.. fertig". Kein Hinweis auf dem Schirm, keine Rückfrage,
  * kein Unterschied zwischen dem Wandschirm im Saal und dem Zählgerät am
  * Tisch. Wo die Kennung herkommt und warum nicht Nuxts eigener Weg, steht in
- * useFassungswechsel.ts.
+ * useVersionSwitch.ts.
  * --------------------------------------------------------------------- */
 
 /**
@@ -1393,9 +1393,9 @@ async function satzAbschliessenGeklickt(winner?: Seite) {
  * Die Liste stammt aus `MatchStatus` in shared/types/api.ts und nicht aus
  * einer Vermutung; geraten wird hier nichts.
  */
-const partieLaeuft = computed(() => {
-  const lage = partie.value?.status
-  return lage === 'RUNNING' || lage === 'TIMEOUT'
+const matchRunning = computed(() => {
+  const status = match.value?.status
+  return status === 'RUNNING' || status === 'TIMEOUT'
 })
 
 /**
@@ -1406,7 +1406,7 @@ const partieLaeuft = computed(() => {
  * sind keine zweite Bedingung derselben Art, sondern der Schutz vor einem
  * Neuladen, das eine gerade laufende BEDIENUNG zerreisst:
  *
- *   - `menueOffen`: vor dem Schirm steht ein Schiedsrichter mit dem Finger
+ *   - `menuOpen`: vor dem Schirm steht ein Schiedsrichter mit dem Finger
  *     auf der Fläche. Im Menü hängen der Tischwechsel, die Karten, die
  *     Aufgabe und die Rücknahme einer Auszeit — alles mit Rückfrage und
  *     teilweise mit sechs Ziffern, die er schon halb getippt hat. Genau
@@ -1414,7 +1414,7 @@ const partieLaeuft = computed(() => {
  *     offene Rückfrage, die gewählte Karte. Er verschwindet beim Laden
  *     ersatzlos, und er ist der Grund, weshalb das Menü sperrt. Es geht von
  *     selbst wieder zu, und dann wird geladen.
- *   - `zaehlwerk.laeuft`: ein Schreibvorgang ist unterwegs. Ein Neuladen
+ *   - `scoring.busy`: ein Schreibvorgang ist unterwegs. Ein Neuladen
  *     mittendrin liesse den Bediener im Ungewissen, ob sein Druck angekommen
  *     ist — der Stand läge zwar im Server, aber er sähe die Antwort nicht
  *     mehr. Das dauert Sekundenbruchteile; beim nächsten Abruf ist es vorbei.
@@ -1427,10 +1427,10 @@ const partieLaeuft = computed(() => {
  * die Auszeit-Uhr wird aus dem Server neu berechnet statt weitergezählt —
  * beides ist ohne laufende Partie bedeutungslos.
  */
-const darfNachladen = computed(() =>
-  !partieLaeuft.value && !menueOffen.value && !zaehlwerk.laeuft.value)
+const canReload = computed(() =>
+  !matchRunning.value && !menuOpen.value && !scoring.busy.value)
 
-const fassung = useFassungswechsel({ darf: darfNachladen })
+const versionSwitch = useVersionSwitch({ allowed: canReload })
 
 /**
  * Derselbe Zusatz, aber mit dem Anstoß, den die Tafel ZEIGEN soll.
@@ -1440,11 +1440,11 @@ const fassung = useFassungswechsel({ darf: darfNachladen })
  * deshalb ist die Vorwegnahme kein zweiter Schattenzustand geworden: es
  * gibt weiterhin eine Quelle, sie ist nur eine Schicht höher.
  */
-const zusatzAngezeigt = computed(() => {
-  const roh = auskunft.value?.match ?? null
-  if (!roh) return null
-  const a = zaehlwerk.anstossStand.value
-  return { ...roh, firstBreak: a.first, nextBreak: a.next }
+const displayedExtra = computed(() => {
+  const raw = info.value?.match ?? null
+  if (!raw) return null
+  const a = scoring.breakState.value
+  return { ...raw, firstBreak: a.first, nextBreak: a.next }
 })
 
 /**
@@ -1467,8 +1467,8 @@ const zusatzAngezeigt = computed(() => {
  * der Partie: eine Tafel, bei der mitten im Halbfinale die Seiten springen,
  * ist für jeden im Saal ein Fehler.
  */
-const links = computed<Seite>(() => (gespiegelt.value ? 'B' : 'A'))
-const rechts = computed<Seite>(() => (gespiegelt.value ? 'A' : 'B'))
+const left = computed<Side>(() => (mirrored.value ? 'B' : 'A'))
+const right = computed<Side>(() => (mirrored.value ? 'A' : 'B'))
 
 /**
  * Wer die Distanz erreicht hat — die Bedingung fürs Beenden.
@@ -1479,32 +1479,32 @@ const rechts = computed<Seite>(() => (gespiegelt.value ? 'A' : 'B'))
  * in der Leiste, weil die Taste 5 der Fernbedienung dieselbe Antwort
  * braucht — zwei Rechnungen für dieselbe Frage laufen auseinander.
  */
-const sieger = computed<Seite | null>(() => {
+const winner = computed<Side | null>(() => {
   /*
    * MIT SATZFORMAT GIBT ES DIESEN KNOPF NICHT — das Beenden eines Satzes
    * gehoert dem Schiedsrichtermenue ("Confirm set", Punkt 2 der Aenderung
-   * vom 25.09.2026) und nicht der Zaehlleiste. `zaehlwerk.stand` traegt bei
+   * vom 25.09.2026) und nicht der Zaehlleiste. `scoring.score` traegt bei
    * Satzformat den Stand IM Satz (gegen `setRaceTo`), waehrend `raceTo` hier
    * die AEUSSERE Zahl der Saetze meint — ein Vergleich der beiden traefe
    * schon nach den ersten Racks eines Satzes zu, lange bevor die Partie
    * durch ist.
    */
-  if (satzformat.value) return null
-  const z = auskunft.value?.match?.raceTo ?? partie.value?.raceTo ?? 0
+  if (setFormat.value) return null
+  const z = info.value?.match?.raceTo ?? match.value?.raceTo ?? 0
   if (z <= 0) return null
-  const s = zaehlwerk.stand.value
+  const s = scoring.score.value
   if (s.A >= z && s.A > s.B) return 'A'
   if (s.B >= z && s.B > s.A) return 'B'
   return null
 })
 
-/** Nur für die Taste "+" der Fernbedienung — siehe tafelTaste. */
-const leiste = ref<{
-  blockOeffnen: (seite: Seite, vorzeichen: 1 | -1) => void
-  /** Die ganze Straight-Pool-Bedienung — siehe spTaste in Zaehlleiste.vue. */
-  spTaste: (taste: string) => boolean
+/** Nur für die Taste "+" der Fernbedienung — siehe onBoardKey. */
+const scoreBar = ref<{
+  blockOpen: (side: Side, vorzeichen: 1 | -1) => void
+  /** Die ganze Straight-Pool-Bedienung — siehe spKey in ScoreBar.vue. */
+  spKey: (key: string) => boolean
   /** Ob dort gerade etwas aussteht; entscheidet, wem die 0 gehört. */
-  spWartet: () => boolean
+  spWaiting: () => boolean
 } | null>(null)
 
 /**
@@ -1517,14 +1517,14 @@ const leiste = ref<{
  * Tafel stehen bliebe, verdeckte im Saal die Sponsoren und liesse sich von
  * niemandem mehr zumachen, der nicht die Tastenfolge kennt.
  */
-watch([zaehlen, partie], ([darf, m]) => {
-  if (!darf || !m) menueOffen.value = false
+watch([canScore, match], ([darf, m]) => {
+  if (!darf || !m) menuOpen.value = false
 })
 
 /**
  * Die Auszeit-Rücknahme des Menüs IST SEIT DEM 15.09.2026 EIN EIGENER WEG.
  *
- * Bis dahin stand hier `zaehlwerk.auszeit(seite, true)` — derselbe Aufruf,
+ * Bis dahin stand hier `scoring.takeTimeout(side, true)` — derselbe Aufruf,
  * den die Fläche der Leiste beim zweiten Tippen macht, mit der Begründung,
  * zwei Aufrufe für dieselbe Sache liefen auseinander. Die Begründung war
  * richtig und die Voraussetzung falsch: es ist NICHT dieselbe Sache. Die
@@ -1535,25 +1535,25 @@ watch([zaehlen, partie], ([darf, m]) => {
  *
  * Jetzt geht er über `competition.withdraw_timeout` und schreibt immer gut
  * — und trägt deshalb den Personencode. Die ganze Abwägung steht an
- * `auszeitRuecknahme` in useZaehlwerk.ts.
+ * `withdrawTimeout` in useScoring.ts.
  */
-function auszeitZurueck(seite: Seite, code: string) {
-  zaehlwerk.auszeitRuecknahme(seite, code)
+function timeoutBack(side: Side, code: string) {
+  scoring.withdrawTimeout(side, code)
 }
 
 /**
  * Steht eine Shot-Clock an, die noch niemand zur Kenntnis genommen hat?
  *
  * <p>Nur dafür gibt es die Taste R und den Punkt im Menü. Gelesen wird
- * `zusatzAngezeigt` und nicht `auskunft` direkt: das ist derselbe Stand, den
+ * `displayedExtra` und nicht `info` direkt: das ist derselbe Stand, den
  * auch die Zählleiste und das Menü sehen — eine zweite Quelle für dieselbe
  * Frage liefe der ersten früher oder später davon.
  *
  * <p>Es laufen hier keine Sekunden mit. Die Shot-Clock führt der
  * Schiedsrichter am Tisch; dieses Gerät weiss nur, DASS sie gilt.
  */
-const shotClockOffen = computed(() => {
-  const sc = zusatzAngezeigt.value?.shotClock
+const shotClockOpen = computed(() => {
+  const sc = displayedExtra.value?.shotClock
   return !!sc && sc.acknowledgedAt === null
 })
 
@@ -1564,15 +1564,15 @@ const shotClockOffen = computed(() => {
  * bei einer Aufgabe "FF" und bei einer Disqualifikation "DIS". Das würde
  * eine Rechnung überschreiben, die es gar nicht gibt.
  */
-function tafelseite(seite: Seite): MatchSide {
-  const roh = seite === 'A' ? partie.value!.sideA : partie.value!.sideB
-  if (!zaehlen.value) return roh
-  const eigen = zaehlwerk.stand.value[seite]
+function boardSide(side: Side): MatchSide {
+  const raw = side === 'A' ? match.value!.sideA : match.value!.sideB
+  if (!canScore.value) return raw
+  const own = scoring.score.value[side]
   /*
    * MIT SATZFORMAT UEBERSCHREIBT DER ZIFFERBLOCK `setScore` UND NICHT
    * `score`.
    *
-   * `zaehlwerk.stand` traegt bei Satzformat den Stand IM laufenden Satz
+   * `scoring.score` traegt bei Satzformat den Stand IM laufenden Satz
    * (gegen `setRaceTo`) — das ist die SATZANZEIGE weiter unten und das
    * Schiedsrichtermenue (dessen "Confirm set" erst anklickbar wird, sobald
    * `setScore` die Distanz erreicht). Die grosse Zahl (`score`/
@@ -1580,19 +1580,19 @@ function tafelseite(seite: Seite): MatchSide {
    * (gewonnene Saetze), und der aendert sich nur beim Abschliessen eines
    * Satzes — also mit dem naechsten Abruf, nicht mit jedem Rack.
    */
-  if (satzformat.value) {
-    if (eigen === (roh.setScore ?? 0)) return roh
-    return { ...roh, setScore: eigen }
+  if (setFormat.value) {
+    if (own === (raw.setScore ?? 0)) return raw
+    return { ...raw, setScore: own }
   }
-  if (eigen === (roh.score ?? 0)) return roh
-  return { ...roh, score: eigen, displayScore: String(eigen) }
+  if (own === (raw.score ?? 0)) return raw
+  return { ...raw, score: own, displayScore: String(own) }
 }
 
 /**
  * DIE SATZANZEIGE — beide Stände, so wie sie aus fünf Metern lesbar sind.
  *
  * `null`, solange die Partie weder ein Satzformat traegt noch in Frames
- * laeuft: an einer gewöhnlichen Partie aendert sich an der Tafel dann
+ * running: an einer gewöhnlichen Partie aendert sich an der Tafel dann
  * NICHTS — genau das verlangt die Aenderung vom 25.09.2026 ausdruecklich.
  *
  * WARUM EINE ZEILE IN DER MITTE UND NICHT EINE ZWEITE ZAHL JE SEITE.
@@ -1611,27 +1611,27 @@ function tafelseite(seite: Seite): MatchSide {
  * liegt zwischen den beiden Spielern — wo ein VERHAELTNIS zwischen ihnen
  * hingehoert — und sie ist gross genug, den laufenden Stand als EIGENE,
  * lesbare Zahl zu zeigen und nicht als Fussnote unter der grossen. Die
- * Reihenfolge links/rechts folgt `links`/`rechts` wie überall auf dieser
+ * Reihenfolge links/rechts folgt `left`/`right` wie überall auf dieser
  * Tafel — wer links steht, steht auch hier links.
  *
  * SNOOKER LIEFERT DEN INNEREN STAND NICHT VOM SERVER (siehe `Match.
- * setRaceTo`) — hier tritt `frameStand`/`frameNummer` an seine Stelle, rein
+ * setRaceTo`) — hier tritt `frameScore`/`frameNumber` an seine Stelle, rein
  * im Geraet gefuehrt (siehe dort).
  */
-const satzanzeige = computed<{ label: string, nummer: number, links: number, rechts: number } | null>(() => {
-  const m = partie.value
+const setDisplay = computed<{ label: string, number: number, left: number, right: number } | null>(() => {
+  const m = match.value
   if (!m) return null
-  if (istSnooker.value) {
+  if (isSnooker.value) {
     return {
       label: 'Frame',
-      nummer: frameNummer.value,
-      links: frameStand.value[links.value],
-      rechts: frameStand.value[rechts.value],
+      number: frameNumber.value,
+      left: frameScore.value[left.value],
+      right: frameScore.value[right.value],
     }
   }
   if (m.currentSetNo === null) return null
-  const s = zaehlwerk.stand.value
-  return { label: 'Set', nummer: m.currentSetNo, links: s[links.value], rechts: s[rechts.value] }
+  const s = scoring.score.value
+  return { label: 'Set', number: m.currentSetNo, left: s[left.value], right: s[right.value] }
 })
 
 /**
@@ -1645,16 +1645,16 @@ const satzanzeige = computed<{ label: string, nummer: number, links: number, rec
  * was GERADE passiert; beim anderen wäre sie ein Rest von vorhin. Der High
  * run steht bei beiden — er ist die Zahl, die im Saal verglichen wird.
  *
- * Aus dem Zählwerk und nicht aus dem Abruf, genau wie `tafelseite` den
+ * Aus dem Zählwerk und nicht aus dem Abruf, genau wie `boardSide` den
  * Stand: wer gerade getippt hat, soll die Zahl im selben Augenblick steigen
  * sehen und nicht beim nächsten Abruf.
  */
-function aufnahme(seite: Seite): { lauf: number | null, high: number } | null {
-  if (modus.value !== 'STRAIGHT_POOL') return null
-  const l = zaehlwerk.lage.value
+function inning(side: Side): { current: number | null, high: number } | null {
+  if (mode.value !== 'STRAIGHT_POOL') return null
+  const l = scoring.tableState.value
   return {
-    lauf: zaehlwerk.amTisch.value === seite ? l.lauf[seite] : null,
-    high: l.high[seite],
+    current: scoring.atTable.value === side ? l.run[side] : null,
+    high: l.high[side],
   }
 }
 
@@ -1664,15 +1664,15 @@ function aufnahme(seite: Seite): { lauf: number | null, high: number } | null {
  *
  * Es zeigt den Stand oben klein mit und rechnet mit ihm: "Karlsson wins 6–4"
  * steht auf der Aufgabe-Fläche, und das muss dieselbe 6 sein, die eine
- * Handbreit darüber auf der Tafel steht. `partie` allein wäre der Stand des
+ * Handbreit darüber auf der Tafel steht. `match` allein wäre der Stand des
  * letzten Abrufs und damit bis zu zehn Sekunden alt — wer gerade den
  * sechsten Satz gezählt hat und dann die Aufgabe bestätigt, schriebe 5–4
  * fest.
  */
-const tafelpartie = computed<Match | null>(() => {
-  const m = partie.value
+const boardMatch = computed<Match | null>(() => {
+  const m = match.value
   if (!m) return null
-  return { ...m, sideA: tafelseite('A'), sideB: tafelseite('B') }
+  return { ...m, sideA: boardSide('A'), sideB: boardSide('B') }
 })
 
 /**
@@ -1706,7 +1706,7 @@ const tafelpartie = computed<Match | null>(() => {
  * der unauffällig zwischen zwei kleinen steht, ist das, wofür er nicht
  * bezahlt hat.
  */
-const STANDZEIT_MS: Record<SponsorRank, number> = {
+const DWELL_MS: Record<SponsorRank, number> = {
   MAIN: 16_000,
   PREMIUM: 11_000,
   REGULAR: 8_000,
@@ -1720,10 +1720,10 @@ const STANDZEIT_MS: Record<SponsorRank, number> = {
  * beim nächsten Laden des Bildschirms wird es wieder versucht — ein Bild
  * fehlt selten für immer, meistens war die Anwendung gerade neu gestartet.
  */
-const defekt = ref<string[]>([])
+const broken = ref<string[]>([])
 
-const sponsoren = computed(() =>
-  (stand.value?.sponsors ?? []).filter(s => !defekt.value.includes(s.id)))
+const sponsors = computed(() =>
+  (snapshot.value?.sponsors ?? []).filter(s => !broken.value.includes(s.id)))
 
 /**
  * Das Karussell läuft NUR, wenn keine Partie da ist und mindestens ein Logo
@@ -1731,12 +1731,12 @@ const sponsoren = computed(() =>
  * Karussell ohne Bilder wäre ein schwarzer Bildschirm im Saal, und der ist
  * von einem Ausfall nicht zu unterscheiden.
  */
-const karussell = computed(() => !partie.value && sponsoren.value.length > 0)
+const carousel = computed(() => !match.value && sponsors.value.length > 0)
 
-const stelle = ref(0)
-const jetzigerSponsor = computed(() => sponsoren.value[stelle.value] ?? null)
+const index = ref(0)
+const currentSponsor = computed(() => sponsors.value[index.value] ?? null)
 
-let sponsorUhr: ReturnType<typeof setTimeout> | null = null
+let sponsorTimer: ReturnType<typeof setTimeout> | null = null
 
 /**
  * Der Weiterschalter.
@@ -1749,18 +1749,18 @@ let sponsorUhr: ReturnType<typeof setTimeout> | null = null
  * Bildschirm, der blinkt — und im Saal die Frage, ob der Fernseher kaputt
  * ist. Ein Sponsor steht also einfach da, so lange der Tisch frei ist.
  */
-function sponsorUhrStellen() {
-  if (sponsorUhr) {
-    clearTimeout(sponsorUhr)
-    sponsorUhr = null
+function scheduleSponsorTimer() {
+  if (sponsorTimer) {
+    clearTimeout(sponsorTimer)
+    sponsorTimer = null
   }
-  if (!karussell.value || sponsoren.value.length < 2) return
+  if (!carousel.value || sponsors.value.length < 2) return
 
-  const dauer = STANDZEIT_MS[jetzigerSponsor.value?.rank ?? 'REGULAR'] ?? STANDZEIT_MS.REGULAR
-  sponsorUhr = setTimeout(() => {
-    stelle.value = (stelle.value + 1) % sponsoren.value.length
-    sponsorUhrStellen()
-  }, dauer)
+  const duration = DWELL_MS[currentSponsor.value?.rank ?? 'REGULAR'] ?? DWELL_MS.REGULAR
+  sponsorTimer = setTimeout(() => {
+    index.value = (index.value + 1) % sponsors.value.length
+    scheduleSponsorTimer()
+  }, duration)
 }
 
 /**
@@ -1769,17 +1769,17 @@ function sponsorUhrStellen() {
  * liefert dieselbe Liste und darf das laufende Logo NICHT zurücksetzen —
  * sonst stünde immer dasselbe erste Logo da und wechselte nie.
  */
-const sponsorenSchluessel = computed(() => sponsoren.value.map(s => s.id).join(','))
+const sponsorsKey = computed(() => sponsors.value.map(s => s.id).join(','))
 
-watch([karussell, sponsorenSchluessel], () => {
+watch([carousel, sponsorsKey], () => {
   // Ist ein Sponsor weggefallen, kann die Stelle ins Leere zeigen.
-  if (stelle.value >= sponsoren.value.length) stelle.value = 0
-  sponsorUhrStellen()
+  if (index.value >= sponsors.value.length) index.value = 0
+  scheduleSponsorTimer()
 })
 
 /** Die Beschriftung über dem Logo. REGULAR bekommt keine — "Partner" unter
  *  jedem zweiten Logo sagt nichts und nimmt dem Rang seine Bedeutung. */
-function rangText(rang: SponsorRank): string {
+function rankText(rang: SponsorRank): string {
   return rang === 'MAIN' ? 'Main partner' : rang === 'PREMIUM' ? 'Premium partner' : ''
 }
 
@@ -1799,11 +1799,11 @@ const { formatMatchTime } = useDateFormat()
  * NICHT über `v-if` im Schablonenteil aufgereiht: dort stünde eine Frage in
  * zwei Zweigen, und der Alternativtext müsste zweimal verzweigen.
  */
-const wappenBild = computed(() => stand.value?.organiserLogo?.url ?? '')
+const crestImage = computed(() => snapshot.value?.organiserLogo?.url ?? '')
 
 /** Der Alternativtext gehört zu dem Bild, das tatsächlich hängt. */
-const wappenText = computed(() =>
-  stand.value?.organiserLogo?.alt || MARKENNAME)
+const crestAlt = computed(() =>
+  snapshot.value?.organiserLogo?.alt || BRAND_NAME)
 
 /**
  * DIE TISCHNUMMER, ZWEISTELLIG — "T07" UND NICHT "TABLE 7"
@@ -1814,8 +1814,8 @@ const wappenText = computed(() =>
  * "T10" dieselbe Form. Das Wort "Table" spart sie sich — auf einem
  * Bildschirm neben einem Billardtisch ist nichts anderes gemeint.
  */
-const tischschild = computed(() =>
-  `T${String(stand.value?.tableNumber ?? tischNummer).padStart(2, '0')}`)
+const tableBadge = computed(() =>
+  `T${String(snapshot.value?.tableNumber ?? tableNumber).padStart(2, '0')}`)
 
 /**
  * Der eigene Name des Tisches — aber nur, wenn er mehr sagt als die Nummer.
@@ -1824,10 +1824,10 @@ const tischschild = computed(() =>
  * "Table 9 · Table 9". Ein Name wie "TV Table" oder "Arena" ist die
  * Auskunft, für die das Feld da ist; die Nummer noch einmal ist keine.
  */
-const tischname = computed(() => {
-  const name = stand.value?.tableName?.trim()
-  const nummer = stand.value?.tableNumber ?? tischNummer
-  if (!name || name.toLowerCase() === `table ${nummer}`) return ''
+const tableLabel = computed(() => {
+  const name = snapshot.value?.tableName?.trim()
+  const number = snapshot.value?.tableNumber ?? tableNumber
+  if (!name || name.toLowerCase() === `table ${number}`) return ''
   return name
 })
 
@@ -1851,8 +1851,8 @@ const tischname = computed(() => {
  * Artistic Pool falsch, und die Tafel müsste eine Zeichnung je Disziplin
  * pflegen, die in den Daten nicht vorkommt.
  */
-const disziplin = computed(() =>
-  partie.value?.discipline?.name || partie.value?.discipline?.code || '')
+const discipline = computed(() =>
+  match.value?.discipline?.name || match.value?.discipline?.code || '')
 
 /**
  * Auch die Disziplin rechnet mit ihrer Länge, aus demselben Grund wie die
@@ -1866,9 +1866,9 @@ const disziplin = computed(() =>
  * ihre Breite. 80 statt 100 cqw lassen dem Wort beidseitig Luft — die
  * Umrandung kostet zusätzlich 0,85 em Polster je Seite.
  */
-const disziplinMass = computed(() => {
-  const zeichen = Math.max(disziplin.value.length, 1)
-  return `min(5.8cqh, ${(80 / (zeichen * 0.78)).toFixed(2)}cqw)`
+const disciplineFontSize = computed(() => {
+  const charCount = Math.max(discipline.value.length, 1)
+  return `min(5.8cqh, ${(80 / (charCount * 0.78)).toFixed(2)}cqw)`
 })
 
 /**
@@ -1893,8 +1893,8 @@ const disziplinMass = computed(() => {
  * Sekunden eine zweite Abfrage zu stellen; richtig wäre, dass die
  * Tafelantwort den Stand der Begegnung mitbringt.
  */
-const begegnung = computed(() => {
-  const m = partie.value
+const matchup = computed(() => {
+  const m = match.value
   if (!m?.parentMatchId) return null
   return m.rubberSeq ? `Team match · Rubber ${m.rubberSeq}` : 'Team match'
 })
@@ -1909,7 +1909,7 @@ const begegnung = computed(() => {
  * fällt aus der Zeile — ein "SCHEDULED" auf einem Bildschirm im Saal ist
  * Innenleben.
  */
-function zustandswort(status: MatchStatus): string {
+function statusWord(status: MatchStatus): string {
   switch (status) {
     case 'RUNNING': return 'Running'
     case 'TIMEOUT': return 'Time out'
@@ -1938,8 +1938,8 @@ function zustandswort(status: MatchStatus): string {
  * Bildschirm hängt, ist die Veranstaltung. Er steht auf der Tafel nur
  * dann, wenn kein Spiel läuft und niemand ihn sonst woher weiß.
  */
-const fusszeile = computed<string[]>(() => {
-  const m = partie.value
+const footerParts = computed<string[]>(() => {
+  const m = match.value
   if (!m) return []
   return [
     m.tournamentName,
@@ -1947,8 +1947,8 @@ const fusszeile = computed<string[]>(() => {
     m.label ? `Match ${m.label}` : '',
     m.scheduledTime ? formatMatchTime(m.scheduledTime) : '',
     m.raceTo ? `Race to ${m.raceTo}` : '',
-    zustandswort(m.status),
-  ].filter(teil => !!teil)
+    statusWord(m.status),
+  ].filter(part => !!part)
 })
 
 useHead({
@@ -1958,9 +1958,9 @@ useHead({
    * abends noch die Namen vom Vormittag. Auf der Tafel selbst sieht das
    * niemand -- im Reiterkopf des Rechners, der sie betreibt, schon.
    */
-  title: () => (partie.value
-    ? `Table ${tischNummer} – ${partie.value.sideA.displayName} v ${partie.value.sideB.displayName}`
-    : `Table ${tischNummer} – ${stand.value?.eventName ?? MARKENNAME}`),
+  title: () => (match.value
+    ? `Table ${tableNumber} – ${match.value.sideA.displayName} v ${match.value.sideB.displayName}`
+    : `Table ${tableNumber} – ${snapshot.value?.eventName ?? BRAND_NAME}`),
   /*
    * Nicht in den Index. Eine Tafel ist für den Saal und nicht für die Suche;
    * ein Treffer "Table 7" führte Monate später auf eine leere Seite.
@@ -1978,10 +1978,10 @@ useHead({
   -->
   <div
     class="board"
-    @pointerdown="druckAn" @pointerup="druckAus"
-    @pointercancel="druckAus" @pointerleave="druckAus"
+    @pointerdown="pressStart" @pointerup="pressEnd"
+    @pointercancel="pressEnd" @pointerleave="pressEnd"
   >
-    <template v-if="unbekannt">
+    <template v-if="unknownEvent">
       <div class="board__hint">
         <p class="board__hint-title">Unknown event</p>
         <p class="board__hint-text">Check the address of this screen.</p>
@@ -1995,11 +1995,11 @@ useHead({
         Turnier unten in der Fußzeile. Zweimal braucht es beides nicht, und
         oben gehört die Fläche dem Stand.
       -->
-      <header v-if="!partie" class="board__head">
-        <span class="board__tournament">{{ stand?.eventName ?? '' }}</span>
+      <header v-if="!match" class="board__head">
+        <span class="board__tournament">{{ snapshot?.eventName ?? '' }}</span>
         <span class="board__table">
-          Table {{ stand?.tableNumber ?? tischNummer }}
-          <template v-if="tischname"> · {{ tischname }}</template>
+          Table {{ snapshot?.tableNumber ?? tableNumber }}
+          <template v-if="tableLabel"> · {{ tableLabel }}</template>
         </span>
       </header>
 
@@ -2007,23 +2007,23 @@ useHead({
         DIE TAFEL: LINKS EIN SPIELER, RECHTS EINER, DAZWISCHEN DAS TURNIER
       -->
       <main
-        v-if="partie"
+        v-if="match"
         class="board__partie"
-        :class="{ 'board__partie--offen': zaehlwerk.unbestaetigt.value }"
+        :class="{ 'board__partie--offen': scoring.unconfirmed.value }"
       >
         <!--
-          `links` und `rechts` statt A und B: welche Seite der Partie wo
+          `left` und `right` statt A und B: welche Seite der Partie wo
           steht, entscheidet dieser Schirm (siehe Spiegel oben) und nicht die
           Auslosung. Der Schlüssel trägt den Buchstaben mit — ohne ihn setzte
           Vue beim Umschalten die Komponente an ihrer Stelle um, und dann
           hinge am neuen Spieler die Schriftgröße des alten Namens.
         -->
         <BoardSide
-          :key="`seite-${links}`"
-          :side="tafelseite(links)"
-          :breaking="zaehlwerk.anstossStand.value.next === links"
-          :timeout="auszeiten[links] ?? null"
-          :aufnahme="aufnahme(links)"
+          :key="`side-${left}`"
+          :side="boardSide(left)"
+          :breaking="scoring.breakState.value.next === left"
+          :timeout="timeoutClocks[left] ?? null"
+          :inning="inning(left)"
           align="start"
         />
 
@@ -2037,7 +2037,7 @@ useHead({
             zwei Mandanten nebeneinander spielen, und dann sind es zwei
             verschiedene Logos.
 
-            SONST das Kürzel dieser Tafel als Schriftzug (`MARKENKUERZEL`) —
+            SONST das Kürzel dieser Tafel als Schriftzug (`BRAND_SHORT`) —
             dieselbe Lösung wie im epbf-website-Original, das hier noch eine
             dritte, verbandseigene Stufe dazwischen kannte (`tenant.
             crestImage`). Die gibt es auf einer Tafel ohne Verband nicht.
@@ -2048,27 +2048,27 @@ useHead({
             nichts.
           -->
           <img
-            v-if="wappenBild"
-            :src="wappenBild"
-            :alt="wappenText"
+            v-if="crestImage"
+            :src="crestImage"
+            :alt="crestAlt"
             class="board__wappen-bild"
           >
-          <p v-else class="board__wappen">{{ MARKENKUERZEL }}</p>
+          <p v-else class="board__wappen">{{ BRAND_SHORT }}</p>
 
-          <p class="board__tischschild">{{ tischschild }}</p>
+          <p class="board__tischschild">{{ tableBadge }}</p>
 
           <p
-            v-if="disziplin"
+            v-if="discipline"
             class="board__disziplin"
-            :style="{ fontSize: disziplinMass }"
-          >{{ disziplin }}</p>
+            :style="{ fontSize: disciplineFontSize }"
+          >{{ discipline }}</p>
 
-          <p v-if="begegnung" class="board__begegnung">{{ begegnung }}</p>
+          <p v-if="matchup" class="board__begegnung">{{ matchup }}</p>
 
           <!--
             DIE ZEITLIMIT-UHR (HEYBALL) — in der Mitte und nicht bei einer
             Seite: sie gehört keinem der beiden Spieler, sondern der Partie.
-            Nur bei gesetztem Zeitlimit im Dokument (`zeitlimit` ist sonst
+            Nur bei gesetztem Zeitlimit im Dokument (`timeLimit` ist sonst
             `null`) — an den allermeisten Turnieren gibt es keins, und dort
             ändert sich hier nichts.
 
@@ -2080,39 +2080,39 @@ useHead({
             der Schiedsrichter ran".
           -->
           <p
-            v-if="zeitlimit"
+            v-if="timeLimit"
             class="board__zeitlimit"
             :class="{
-              'board__zeitlimit--pausiert': !zeitlimit.running,
-              'board__zeitlimit--ueber': zeitlimit.ueberzogen,
+              'board__zeitlimit--pausiert': !timeLimit.running,
+              'board__zeitlimit--ueber': timeLimit.overrun,
             }"
           >
-            <span v-if="!zeitlimit.running" class="board__zeitlimit-marke" aria-hidden="true">II</span>
-            {{ zeitlimit.ueberzogen ? 'Time limit up' : 'Time limit' }} {{ zeitlimit.text }}
+            <span v-if="!timeLimit.running" class="board__zeitlimit-marke" aria-hidden="true">II</span>
+            {{ timeLimit.overrun ? 'Time limit up' : 'Time limit' }} {{ timeLimit.text }}
           </p>
 
           <!--
             DIE SATZANZEIGE — Sätze bzw. Frames, seit dem 25.09.2026.
 
             Nur, wenn die Partie ein Satzformat trägt oder in Frames läuft
-            (`satzanzeige` ist sonst `null`) — an jeder anderen Partie ändert
-            sich hier nichts. Siehe die Begründung an `satzanzeige`: die
+            (`setDisplay` ist sonst `null`) — an jeder anderen Partie ändert
+            sich hier nichts. Siehe die Begründung an `setDisplay`: die
             Mitte und nicht eine zweite Zeile je Spieler, weil hier ein
             VERHÄLTNIS zwischen den beiden steht und nicht eine zweite
             eigene Zahl.
           -->
-          <p v-if="satzanzeige" class="board__satz">
-            <span class="board__satz-label">{{ satzanzeige.label }} {{ satzanzeige.nummer }}</span>
-            <span class="board__satz-stand">{{ satzanzeige.links }}:{{ satzanzeige.rechts }}</span>
+          <p v-if="setDisplay" class="board__satz">
+            <span class="board__satz-label">{{ setDisplay.label }} {{ setDisplay.number }}</span>
+            <span class="board__satz-stand">{{ setDisplay.left }}:{{ setDisplay.right }}</span>
           </p>
         </div>
 
         <BoardSide
-          :key="`seite-${rechts}`"
-          :side="tafelseite(rechts)"
-          :breaking="zaehlwerk.anstossStand.value.next === rechts"
-          :timeout="auszeiten[rechts] ?? null"
-          :aufnahme="aufnahme(rechts)"
+          :key="`side-${right}`"
+          :side="boardSide(right)"
+          :breaking="scoring.breakState.value.next === right"
+          :timeout="timeoutClocks[right] ?? null"
+          :inning="inning(right)"
           align="end"
         />
       </main>
@@ -2121,7 +2121,7 @@ useHead({
         Der Ruhezustand. Entweder die Sponsoren oder der Hinweis — nie beides
         und nie nichts.
       -->
-      <main v-else-if="karussell" class="board__idle board__idle--sponsors">
+      <main v-else-if="carousel" class="board__idle board__idle--sponsors">
         <!--
           ALLE Logos stehen im Dokument, sichtbar ist eines.
           So sind sie geladen, bevor sie an die Reihe kommen; würde je Wechsel
@@ -2131,24 +2131,24 @@ useHead({
         -->
         <div class="board__stage">
           <figure
-            v-for="(sponsor, i) in sponsoren"
+            v-for="(sponsor, i) in sponsors"
             :key="sponsor.id"
             class="board__sponsor"
             :class="[
               `board__sponsor--${sponsor.rank.toLowerCase()}`,
-              { 'board__sponsor--on': i === stelle },
+              { 'board__sponsor--on': i === index },
             ]"
-            :aria-hidden="i !== stelle"
+            :aria-hidden="i !== index"
           >
-            <figcaption v-if="rangText(sponsor.rank)" class="board__sponsor-rank">
-              {{ rangText(sponsor.rank) }}
+            <figcaption v-if="rankText(sponsor.rank)" class="board__sponsor-rank">
+              {{ rankText(sponsor.rank) }}
             </figcaption>
             <span class="board__plate">
               <img
                 :src="sponsor.logo.url"
                 :alt="sponsor.name"
                 decoding="async"
-                @error="defekt.push(sponsor.id)"
+                @error="broken.push(sponsor.id)"
               >
             </span>
           </figure>
@@ -2157,8 +2157,8 @@ useHead({
       </main>
 
       <main v-else class="board__idle">
-        <p class="board__idle-table">Table {{ stand?.tableNumber ?? tischNummer }}</p>
-        <p class="board__idle-event">{{ stand?.eventName ?? '' }}</p>
+        <p class="board__idle-table">Table {{ snapshot?.tableNumber ?? tableNumber }}</p>
+        <p class="board__idle-event">{{ snapshot?.eventName ?? '' }}</p>
         <p class="board__idle-text">Next match to follow</p>
       </main>
 
@@ -2170,56 +2170,56 @@ useHead({
         auf dasselbe Gerät, und die grösste Zahl des Bildes bleibt die
         grösste Zahl des Bildes.
       -->
-      <BoardZaehlleiste
-        v-if="zaehlen && partie && !istSnooker"
-        ref="leiste"
+      <BoardScoreBar
+        v-if="canScore && match && !isSnooker"
+        ref="scoreBar"
         class="board__zaehlleiste"
-        :partie="partie"
-        :modus="modus"
-        :stand="zaehlwerk.stand.value"
-        :lage="zaehlwerk.lage.value"
-        :am-tisch="zaehlwerk.amTisch.value"
-        :zusatz="zusatzAngezeigt"
-        :auszeit-laeuft="{ A: !!auszeiten.A, B: !!auszeiten.B }"
-        :sieger="sieger"
-        :distanz-erreicht="zaehlwerk.distanzErreicht.value"
-        :links="links"
-        :rechts="rechts"
-        :laeuft="zaehlwerk.laeuft.value"
-        :fehler="zaehlwerk.fehler.value"
-        :kann-zurueck="zaehlwerk.kannZurueck.value"
-        @zaehlen="(seite, schritt) => zaehlwerk.zaehlen(seite, schritt)"
-        @zurueck="zaehlwerk.zurueck()"
-        @anstoss="seite => zaehlwerk.anstoss(seite)"
-        @auszeit="(seite, laeuftGerade) => zaehlwerk.auszeit(seite, laeuftGerade)"
-        @beenden="zaehlwerk.beenden()"
-        @rest="uebrig => zaehlwerk.restEintragen(uebrig)"
-        @rack="auchDieFuenfzehnte => zaehlwerk.rack(auchDieFuenfzehnte)"
-        @safety="zaehlwerk.safety()"
-        @foul="griff => zaehlwerk.foul(griff)"
-        @tisch="zaehlwerk.tischWechseln()"
+        :match="match"
+        :mode="mode"
+        :score="scoring.score.value"
+        :balls-on-table="scoring.tableState.value"
+        :at-table="scoring.atTable.value"
+        :extra="displayedExtra"
+        :timeout-running="{ A: !!timeoutClocks.A, B: !!timeoutClocks.B }"
+        :winner="winner"
+        :race-reached="scoring.distanceReached.value"
+        :left="left"
+        :right="right"
+        :busy="scoring.busy.value"
+        :error="scoring.error.value"
+        :can-undo="scoring.canUndo.value"
+        @count="(side, step) => scoring.count(side, step)"
+        @undo="scoring.performUndo()"
+        @break="side => scoring.setBreaker(side)"
+        @timeout="(side, running) => scoring.takeTimeout(side, running)"
+        @finish="scoring.finish()"
+        @remaining="uebrig => scoring.enterRest(uebrig)"
+        @rack="alsoFifteenth => scoring.rack(alsoFifteenth)"
+        @safety="scoring.safety()"
+        @foul="kind => scoring.foul(kind)"
+        @table="scoring.switchTable()"
       />
 
       <!--
         SNOOKER — DIE BALLWERTE STATT DES GEWOHNTEN ZIFFERBLOCKS.
 
-        Siehe die Begründung an `istSnooker` und am Kopf von
-        `BoardBallwerte.vue`: `PUT /score` schriebe ohne Satzformat direkt
+        Siehe die Begründung an `isSnooker` und am Kopf von
+        `BoardBallValues.vue`: `PUT /score` schriebe ohne Satzformat direkt
         den Aussenstand (gewonnene Frames), und genau das darf ein
         versenkter Ball nicht auslösen. Diese Fläche schickt deshalb nichts
         an die Verwaltung — sie meldet nur, WAS am Tisch passiert ist, und
-        [table].vue führt daraus den lokalen Frame-Stand (`frameStand`).
+        [table].vue führt daraus den lokalen Frame-Stand (`frameScore`).
       -->
-      <BoardBallwerte
-        v-else-if="zaehlen && partie && istSnooker"
+      <BoardBallValues
+        v-else-if="canScore && match && isSnooker"
         class="board__zaehlleiste"
-        :links="links"
-        :rechts="rechts"
-        :stand="frameStand"
-        :kann-zurueck="!!frameLetzter"
-        @pot="(seite, wert) => frameBall(seite, wert)"
-        @foul="(seite, punkte) => frameFoul(seite, punkte)"
-        @zurueck="frameZurueck()"
+        :left="left"
+        :right="right"
+        :score="frameScore"
+        :can-undo="!!lastFrameEntry"
+        @pot="(side, value) => frameBall(side, value)"
+        @foul="(side, points) => frameFoul(side, points)"
+        @undo="undoFrame()"
       />
 
       <!--
@@ -2228,8 +2228,8 @@ useHead({
         weiter und der Saal soll sie sehen —, sondern als eine Zeile, die
         der Turnierleitung sagt, was zu tun ist.
       -->
-      <p v-else-if="zaehlHindernis" class="board__zaehlhinweis">
-        {{ zaehlHindernis }} · press 0 twice to set this screen up again
+      <p v-else-if="scoringBlocked" class="board__zaehlhinweis">
+        {{ scoringBlocked }} · press 0 twice to set this screen up again
       </p>
 
       <!--
@@ -2241,28 +2241,28 @@ useHead({
         fixed`). Ein Vorhang, der in einer Rasterzeile hinge, wäre so hoch
         wie diese Zeile.
       -->
-      <BoardSchirimenue
-        v-if="menueOffen && zaehlen && tafelpartie"
-        :partie="tafelpartie"
-        :zusatz="zusatzAngezeigt"
-        :links="links"
-        :rechts="rechts"
-        :auszeit-laeuft="{ A: !!auszeiten.A, B: !!auszeiten.B }"
-        :modus="modus"
-        :als-mensch="auskunft?.actingAs === 'PERSON'"
-        :laeuft="zaehlwerk.laeuft.value"
-        :fehler="zaehlwerk.fehler.value"
-        :fassung="fassung.kurz"
-        :fassung-wartet="fassung.wartet.value"
-        :zeitlimit="zeitlimit"
-        @schliessen="menueOffen = false"
-        @tischwechsel="zurueckZurWahl()"
-        @auszeit-zurueck="(seite, code) => auszeitZurueck(seite, code)"
-        @aufgabe="(seite, art, code) => zaehlwerk.aufgeben(seite, art, code)"
-        @shot-clock="zaehlwerk.shotClockBestaetigen()"
-        @zeitlimit-laufen="laufend => zaehlwerk.zeitlimitLaufen(laufend)"
-        @zeitlimit-beenden="shootoutWinner => zaehlwerk.zeitlimitBeenden(shootoutWinner)"
-        @satz-abschliessen="winner => satzAbschliessenGeklickt(winner)"
+      <BoardRefereeMenu
+        v-if="menuOpen && canScore && boardMatch"
+        :match="boardMatch"
+        :extra="displayedExtra"
+        :left="left"
+        :right="right"
+        :timeout-running="{ A: !!timeoutClocks.A, B: !!timeoutClocks.B }"
+        :mode="mode"
+        :as-human="info?.actingAs === 'PERSON'"
+        :busy="scoring.busy.value"
+        :error="scoring.error.value"
+        :version="versionSwitch.short"
+        :version-pending="versionSwitch.pending.value"
+        :time-limit="timeLimit"
+        @close="menuOpen = false"
+        @table-switch="backToPicker()"
+        @timeout-back="(side, code) => timeoutBack(side, code)"
+        @give-up="(side, art, code) => scoring.giveUp(side, art, code)"
+        @shot-clock="scoring.acknowledgeShotClock()"
+        @time-limit-running="laufend => scoring.setTimeLimitRunning(laufend)"
+        @time-limit-finish="shootoutWinner => scoring.finishTimeLimit(shootoutWinner)"
+        @set-finish="winner => finishSetClicked(winner)"
       />
 
       <footer class="board__foot">
@@ -2281,10 +2281,10 @@ useHead({
             ein doppelter Schlüssel setzt beim Auffrischen die falsche um.
           -->
           <span
-            v-for="(teil, i) in fusszeile"
-            :key="`${i}-${teil}`"
+            v-for="(part, i) in footerParts"
+            :key="`${i}-${part}`"
             class="board__angabe"
-          >{{ teil }}</span>
+          >{{ part }}</span>
         </p>
 
         <!--
@@ -2301,47 +2301,47 @@ useHead({
           Moment blasser wird.
 
           `--pending` IST DER LANGE ZUSTAND, UND ER BRAUCHT EINEN SATZ.
-          `zaehlwerk.netzausfall` steht, solange ein Stand an einem Netzfehler
+          `scoring.offline` steht, solange ein Stand an einem Netzfehler
           gescheitert ist und auf seine Wiederholung wartet (siehe
-          `merkposten` in useZaehlwerk.ts) — das kann Minuten dauern, und
+          `merkposten` in useScoring.ts) — das kann Minuten dauern, und
           "die Zahl ist blasser" reicht dafür nicht: aus fünf Metern sieht
           blass wie normal aus. Der Satz sagt deshalb ausdrücklich, dass die
           Zahl oben zwar richtig ist, die Anwendung sie aber noch nicht
           gesehen hat — ohne eine Bewegung (kein Kringel, siehe
-          WIMPERNSCHLAG_MS in useZaehlwerk.ts) und ohne den Spielbetrieb zu
+          WIMPERNSCHLAG_MS in useScoring.ts) und ohne den Spielbetrieb zu
           unterbrechen: gezählt wird weiter, auch während der Satz steht.
 
           Er geht vor `--lost`, denn er ist die genauere Auskunft: ein
           Netzausfall zeigt sich hier oft VOR den drei verpassten Abrufen,
-          die `verbindungWeg` erst nach dreissig Sekunden auslösen. Steht
+          die `connectionLost` erst nach dreissig Sekunden auslösen. Steht
           kein Stand mehr aus, aber die Abrufe bleiben trotzdem aus, sagt
           `--lost` weiter "no connection" — das betrifft dann die ganze
           Tafel und nicht nur den letzten Tipp.
 
-          `zaehlwerk.ergebnisAusstehend` GEHT VOR ALLEM ANDEREN. Sie meint
+          `scoring.resultPending` GEHT VOR ALLEM ANDEREN. Sie meint
           "beenden"/"aufgeben" — die Partie ist am Tisch entschieden, nur
           die Anwendung weiss es noch nicht, weil auch DIESER Aufruf an
           einem Netzfehler gescheitert ist (siehe die Begründung vor
-          `beenden` in useZaehlwerk.ts). Der Satz sagt ausdrücklich NICHT
+          `beenden` in useScoring.ts). Der Satz sagt ausdrücklich NICHT
           "finished" — das würde behaupten, was noch nicht gilt —, sondern
           nur, dass ein Ergebnis hier bereitliegt. Währenddessen ist die
-          Leiste ohnehin gesperrt (`laeuft`); dieser Satz ist die einzige
+          Leiste ohnehin gesperrt (`busy`); dieser Satz ist die einzige
           Auskunft, WARUM sie es noch ist.
         -->
         <span
           class="board__link"
           :class="{
-            'board__link--pending': zaehlwerk.ergebnisAusstehend.value || zaehlwerk.netzausfall.value,
-            'board__link--lost': !zaehlwerk.ergebnisAusstehend.value && !zaehlwerk.netzausfall.value
-              && verbindungWeg,
-            'board__link--offen': !zaehlwerk.ergebnisAusstehend.value && !zaehlwerk.netzausfall.value
-              && !verbindungWeg && zaehlwerk.unbestaetigt.value,
+            'board__link--pending': scoring.resultPending.value || scoring.offline.value,
+            'board__link--lost': !scoring.resultPending.value && !scoring.offline.value
+              && connectionLost,
+            'board__link--offen': !scoring.resultPending.value && !scoring.offline.value
+              && !connectionLost && scoring.unconfirmed.value,
           }"
         >
           <span class="board__dot" aria-hidden="true" />
-          <span v-if="zaehlwerk.ergebnisAusstehend.value">result pending</span>
-          <span v-else-if="zaehlwerk.netzausfall.value">not sent yet</span>
-          <span v-else-if="verbindungWeg">no connection</span>
+          <span v-if="scoring.resultPending.value">result pending</span>
+          <span v-else-if="scoring.offline.value">not sent yet</span>
+          <span v-else-if="connectionLost">no connection</span>
         </span>
       </footer>
     </template>
@@ -2385,13 +2385,13 @@ useHead({
   /*
    * KEIN MARKIEREN, KEIN LUPENGLAS, KEIN KONTEXTMENÜ.
    *
-   * Der lange Druck öffnet das Schiedsrichtermenü (siehe `druckAn` oben) —
+   * Der lange Druck öffnet das Schiedsrichtermenü (siehe `pressStart` oben) —
    * und genau dieselbe Geste ist auf iOS die zum Markieren von Text. Wer am
    * Tablet den Rahmen festhielt, bekam den halben Spielernamen blau
    * hinterlegt, dazu die Lupe und die Leiste "Kopieren | Nachschlagen",
    * während hinter alldem das Menü aufging.
    *
-   * Die Zähltasten tragen das schon einzeln (Zaehltaste.vue) — der Rahmen
+   * Die Zähltasten tragen das schon einzeln (ScoreKey.vue) — der Rahmen
    * mit Namen, Stand und Tischnummer nicht, und der ist die Fläche, die man
    * festhält.
    *
@@ -2452,7 +2452,7 @@ useHead({
    * Auf dem Schreibtisch fällt das NIE auf, weil dort beide Masse gleich
    * sind. Wer hier ein Mass ergänzt, nimmt dvh — auch in `min()` und auch
    * in einer Schriftgrösse, die das Skript ausrechnet (siehe
-   * `disziplinMass`).
+   * `disciplineFontSize`).
    */
   height: 100dvh;
   background: var(--ground);
@@ -2508,7 +2508,7 @@ useHead({
    * EINE ZEILE, UND SIE FÜLLT DIE HÖHE — AUSGESCHRIEBEN UND NICHT IMPLIZIT.
    *
    * Die drei Kinder sind seit dem 16.09.2026 Größen-Container (siehe
-   * `.seite` und `.board__mitte`), und ein Größen-Container gibt seinem
+   * `.side` und `.board__mitte`), und ein Größen-Container gibt seinem
    * Elternteil KEINE Inhaltshöhe mehr zurück. Eine implizite `auto`-Zeile
    * fiele damit auf null zusammen. `minmax(0, 1fr)` sagt es ausdrücklich:
    * die Zeile ist so hoch wie der Kasten, und die Kinder messen daran.
@@ -2521,7 +2521,7 @@ useHead({
    *
    * Die Leiste beginnt mit ihrer Oberkante (`.sp`, `.leiste__spalten`)
    * genau dort, wo dieser Kasten endet. Was in ihm steht, bleibt in ihm —
-   * dafür sorgt die Rechnung in `.seite`; was hier stehenbleibt, ist die
+   * dafür sorgt die Rechnung in `.side`; was hier stehenbleibt, ist die
    * Luft dazwischen, und die ist damit Absicht und nicht Rest. `max(..px)`,
    * weil 2,6 dvh auf einem flachen Schirm (480 px) nur zwölf Punkte wären
    * und die Kante dann an der Unterlänge des Vornamens klebte.
@@ -2542,7 +2542,7 @@ useHead({
  * den, der von weiter weg hinsieht, und für den Fall, dass gerade gar nichts
  * getippt wurde.
  *
- * ERST NACH EINEM HALBEN AUGENBLICK, siehe WIMPERNSCHLAG_MS in useZaehlwerk:
+ * ERST NACH EINEM HALBEN AUGENBLICK, siehe WIMPERNSCHLAG_MS in useScoring:
  * im Saal dauert ein Schreibvorgang dreißig Millisekunden, und eine Tafel,
  * die bei jedem Satz kurz zuckt, wäre vor Publikum schlimmer als die
  * Ungewissheit, die sie anzeigen soll.
@@ -2719,7 +2719,7 @@ useHead({
  * Stillstand ist zwischen zwei Racks der HÄUFIGSTE Zustand dieser Uhr —
  * competition.score_pauses_the_clock hält sie nach jedem gewerteten Rack
  * an, und der Schiedsrichter setzt sie erst nach dem Neuaufbau von Hand
- * fort (siehe Schirimenue.vue). Die Füllung fällt deshalb weg, der Rand
+ * fort (siehe RefereeMenu.vue). Die Füllung fällt deshalb weg, der Rand
  * wird gestrichelt statt durchgezogen, und die Marke "II" davor sagt, was
  * zu sehen ist, auch ohne dass jemand die Farbe deutet — dieselbe
  * Überlegung wie beim Anstoßbalken, nur umgekehrt: dort zeigt Füllung
@@ -2921,7 +2921,7 @@ useHead({
 
 /*
  * Der Hauptsponsor bekommt mehr Fläche — gut zwei Drittel mehr Höhe als ein
- * regulärer. Zusammen mit der doppelten Standzeit (siehe STANDZEIT_MS) ist
+ * regulärer. Zusammen mit der doppelten Standzeit (siehe DWELL_MS) ist
  * er damit als Erster erkennbar, ohne dass es irgendwo geschrieben stünde.
  */
 .board__sponsor--main .board__plate img {
@@ -3053,7 +3053,7 @@ useHead({
  * DIESELBE WARNFARBE WIE `--lost`, UND ABSICHTLICH — beides ist ein
  * Netzproblem, nur mit einer genaueren Ursache; der Unterschied steht im
  * Satz daneben und nicht in einer eigenen Farbe. KEINE ANIMATION: ein
- * Pulsieren wäre die Bewegung, die WIMPERNSCHLAG_MS in useZaehlwerk.ts
+ * Pulsieren wäre die Bewegung, die WIMPERNSCHLAG_MS in useScoring.ts
  * ausdrücklich vermeidet — sie zieht aus fünf Metern mehr Blicke auf sich
  * als der Satzstand daneben.
  */

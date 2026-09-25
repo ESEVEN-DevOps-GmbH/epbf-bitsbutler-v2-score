@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Seite, Standpaar } from '~/composables/useZaehlwerk'
+import type { Side, ScorePair } from '~/composables/useScoring'
 
 /**
  * DIE BALLWERTE — SNOOKER, SEIT DEM 25.09.2026.
@@ -42,21 +42,21 @@ import type { Seite, Standpaar } from '~/composables/useZaehlwerk'
  */
 const props = defineProps<{
   /** Welche Seite der Partie links auf dem Schirm steht — siehe Spiegel. */
-  links: Seite
-  rechts: Seite
+  left: Side
+  right: Side
   /** Der laufende Frame-Stand, rein im Gerät geführt — siehe Kopf. */
-  stand: Standpaar
+  score: ScorePair
   /** Ob ein lokaler Schritt zum Zurücknehmen dasteht. */
-  kannZurueck: boolean
+  canUndo: boolean
 }>()
 
 const emit = defineEmits<{
-  /** Ein Ball ist gefallen — legal versenkt von `seite`. */
-  pot: [seite: Seite, wert: number]
-  /** Ein Foul von `seite` — die Punkte gehen an den Gegner, siehe [table].vue. */
-  foul: [seite: Seite, punkte: number]
+  /** Ein Ball ist gefallen — legal versenkt von `side`. */
+  pot: [side: Side, value: number]
+  /** Ein Foul von `side` — die Punkte gehen an den Gegner, siehe [table].vue. */
+  foul: [side: Side, points: number]
   /** Den letzten lokalen Eintrag zurücknehmen. */
-  zurueck: []
+  undo: []
 }>()
 
 /**
@@ -69,14 +69,14 @@ const emit = defineEmits<{
  * eine Tafel, die "blau" in Türkis (der Akzentfarbe) zeichnete, würde genau
  * die Zuordnung verwischen, um die es geht.
  */
-const BAELLE: { wert: number, wort: string, farbe: string, hell: boolean }[] = [
-  { wert: 1, wort: 'Red', farbe: '#c62828', hell: true },
-  { wert: 2, wort: 'Yellow', farbe: '#f2c40c', hell: false },
-  { wert: 3, wort: 'Green', farbe: '#1e7d3c', hell: true },
-  { wert: 4, wort: 'Brown', farbe: '#6b4226', hell: true },
-  { wert: 5, wort: 'Blue', farbe: '#1a5fb4', hell: true },
-  { wert: 6, wort: 'Pink', farbe: '#e0759a', hell: false },
-  { wert: 7, wort: 'Black', farbe: '#1a1a1a', hell: true },
+const BALLS: { value: number, word: string, color: string, light: boolean }[] = [
+  { value: 1, word: 'Red', color: '#c62828', light: true },
+  { value: 2, word: 'Yellow', color: '#f2c40c', light: false },
+  { value: 3, word: 'Green', color: '#1e7d3c', light: true },
+  { value: 4, word: 'Brown', color: '#6b4226', light: true },
+  { value: 5, word: 'Blue', color: '#1a5fb4', light: true },
+  { value: 6, word: 'Pink', color: '#e0759a', light: false },
+  { value: 7, word: 'Black', color: '#1a1a1a', light: true },
 ]
 
 /**
@@ -89,46 +89,46 @@ const BAELLE: { wert: number, wort: string, farbe: string, hell: boolean }[] = [
  * für "Foul an Rot" nebeneinander wäre für dieselbe Handlung zwei
  * verschiedene Kacheln.
  */
-const FOULS: { wert: number, wort: string }[] = [
-  { wert: 4, wort: 'Foul' },
-  { wert: 5, wort: 'Foul · blue' },
-  { wert: 6, wort: 'Foul · pink' },
-  { wert: 7, wort: 'Foul · black' },
+const FOULS: { value: number, word: string }[] = [
+  { value: 4, word: 'Foul' },
+  { value: 5, word: 'Foul · blue' },
+  { value: 6, word: 'Foul · pink' },
+  { value: 7, word: 'Foul · black' },
 ]
 </script>
 
 <template>
   <div class="ballwerte">
-    <p v-if="kannZurueck" class="ballwerte__kopf">
-      <button type="button" class="ballwerte__zurueck" @click="emit('zurueck')">
+    <p v-if="canUndo" class="ballwerte__kopf">
+      <button type="button" class="ballwerte__zurueck" @click="emit('undo')">
         Undo last entry
       </button>
     </p>
 
     <div class="ballwerte__spalten">
-      <div v-for="seite in [links, rechts]" :key="`ball-${seite}`" class="ballwerte__seite">
-        <p class="ballwerte__stand">{{ stand[seite] }}</p>
+      <div v-for="side in [left, right]" :key="`ball-${side}`" class="ballwerte__seite">
+        <p class="ballwerte__stand">{{ score[side] }}</p>
 
         <div class="ballwerte__reihe">
           <button
-            v-for="ball in BAELLE" :key="`${seite}-${ball.wert}`"
+            v-for="ball in BALLS" :key="`${side}-${ball.value}`"
             type="button" class="ballwerte__ball"
-            :class="{ 'ballwerte__ball--hell': ball.hell }"
-            :style="{ background: ball.farbe }"
-            @click="emit('pot', seite, ball.wert)"
+            :class="{ 'ballwerte__ball--hell': ball.light }"
+            :style="{ background: ball.color }"
+            @click="emit('pot', side, ball.value)"
           >
-            <span class="ballwerte__wert">{{ ball.wert }}</span>
-            <span class="ballwerte__wort">{{ ball.wort }}</span>
+            <span class="ballwerte__wert">{{ ball.value }}</span>
+            <span class="ballwerte__wort">{{ ball.word }}</span>
           </button>
         </div>
 
         <div class="ballwerte__reihe ballwerte__reihe--foul">
           <button
-            v-for="f in FOULS" :key="`${seite}-foul-${f.wert}`"
+            v-for="f in FOULS" :key="`${side}-foul-${f.value}`"
             type="button" class="ballwerte__foul"
-            @click="emit('foul', seite, f.wert)"
+            @click="emit('foul', side, f.value)"
           >
-            {{ f.wort }} (+{{ f.wert }})
+            {{ f.word }} (+{{ f.value }})
           </button>
         </div>
       </div>
@@ -243,7 +243,7 @@ const FOULS: { wert: number, wort: string }[] = [
 
 /*
  * DIE FOULFLÄCHEN — umrandet und nicht gefüllt, wie das Zurücknehmen in
- * `Zaehltaste.vue`: sie sollen erkennbar, aber nicht einladend wirken. Ein
+ * `ScoreKey.vue`: sie sollen erkennbar, aber nicht einladend wirken. Ein
  * Foul ist kein Ereignis, das man anstrebt.
  */
 .ballwerte__foul {

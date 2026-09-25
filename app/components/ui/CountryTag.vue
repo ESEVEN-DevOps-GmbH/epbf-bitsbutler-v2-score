@@ -35,11 +35,11 @@ const props = defineProps<{ country: Country | null, showName?: boolean }>()
  * einen 404 zeigt das kaputte Bildsymbol des Browsers, und das ist schlechter
  * als gar kein Bild.
  */
-const geladen = ref(true)
-watch(() => props.country?.iso3, () => (geladen.value = true))
+const loaded = ref(true)
+watch(() => props.country?.iso3, () => (loaded.value = true))
 
-const eigeneFlagge = computed(() =>
-  props.country?.hasOwnFlag && props.country.iso3 && geladen.value
+const ownFlag = computed(() =>
+  props.country?.hasOwnFlag && props.country.iso3 && loaded.value
     ? `/api/countries/${encodeURIComponent(props.country.iso3)}/flag.svg`
     : null)
 
@@ -47,9 +47,9 @@ const eigeneFlagge = computed(() =>
  * Die Klasse des Flaggensatzes. Streng geprüft, weil sie aus der Antwort der
  * Anwendung kommt und hier in ein Klassenattribut geht.
  */
-const satzKlasse = computed(() => {
+const flagSetClass = computed(() => {
   const key = props.country?.flagKey
-  return !eigeneFlagge.value && key && /^[a-z]{2}(-[a-z]{2,3})?$/.test(key)
+  return !ownFlag.value && key && /^[a-z]{2}(-[a-z]{2,3})?$/.test(key)
     ? `fi fi-${key}`
     : null
 })
@@ -58,8 +58,8 @@ const satzKlasse = computed(() => {
 <template>
   <span v-if="country" class="country-tag">
     <img
-      v-if="eigeneFlagge"
-      :src="eigeneFlagge"
+      v-if="ownFlag"
+      :src="ownFlag"
       :alt="country.name"
       :title="country.name"
       class="country-tag__flag"
@@ -67,18 +67,18 @@ const satzKlasse = computed(() => {
       height="12"
       loading="lazy"
       decoding="async"
-      @error="geladen = false"
+      @error="loaded = false"
     >
     <span
-      v-else-if="satzKlasse"
-      :class="satzKlasse"
+      v-else-if="flagSetClass"
+      :class="flagSetClass"
       class="country-tag__flag"
       role="img"
       :title="country.name"
       :aria-label="country.name"
     />
     <abbr
-      v-if="!eigeneFlagge && !satzKlasse"
+      v-if="!ownFlag && !flagSetClass"
       class="country-tag__code"
       :title="country.name"
     >{{ country.iso3 }}</abbr>

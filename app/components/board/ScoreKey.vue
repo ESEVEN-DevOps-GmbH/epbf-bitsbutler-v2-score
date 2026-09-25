@@ -25,22 +25,22 @@
  */
 const props = defineProps<{
   /** Die grosse Zeile — ein Zeichen oder ein Wort, nie ein Satz. */
-  beschriftung: string
+  label: string
   /** Die kleine Zeile darunter: Zustand oder Grund. Leer heisst: keine. */
-  hinweis?: string
+  hint?: string
   /**
    * Die Taste des Vorgängersystems, die dasselbe tut. Sie steht klein in
    * der Ecke, weil in den Hallen Fernbedienungen mit Zifferblock liegen und
    * die Zählenden diese Belegung seit Jahren kennen.
    */
-  taste?: string
+  key?: string
   /** `gross` füllt die Zeile, `schmal` steht daneben. */
-  breite?: 'gross' | 'schmal' | 'voll'
+  width?: 'gross' | 'schmal' | 'voll'
   /** `plus` zählt hoch, `minus` nimmt zurück, `ende` beendet. */
-  art?: 'plus' | 'minus' | 'ende' | 'neutral'
-  gesperrt?: boolean
+  kind?: 'plus' | 'minus' | 'ende' | 'neutral'
+  locked?: boolean
   /** Solange etwas unterwegs ist, zeigt die ganze Leiste, dass sie arbeitet. */
-  arbeitet?: boolean
+  busy?: boolean
 }>()
 
 /**
@@ -63,20 +63,20 @@ const props = defineProps<{
  * („SAFETY") em je Zeichen, der Hinweis in Gewicht 600 deren 0,584 bis
  * 0,611. Gerechnet wird über dem Höchstwert.
  */
-function breitenmass(text: string, anteil: number, dichte: number): string {
-  const zeichen = Math.max(text.trim().length, 1)
-  return `${(anteil / (zeichen * dichte)).toFixed(2)}cqw`
+function fitFontSize(text: string, share: number, density: number): string {
+  const chars = Math.max(text.trim().length, 1)
+  return `${(share / (chars * density)).toFixed(2)}cqw`
 }
 
 /* 92 statt 100 cqw: die Beschriftung soll nicht am Rand kleben. */
-const wortBreite = computed(() => breitenmass(props.beschriftung, 92, 0.72))
+const labelFontSize = computed(() => fitFontSize(props.label, 92, 0.72))
 
 /*
  * Der Hinweis darf umbrechen, deshalb 170 statt 92: er bekommt knapp zwei
  * Zeilen zugestanden. Drei Zeilen wären nicht falsch, aber sie machen die
  * Fläche höher, und die Leiste nimmt der Tafel darüber die Höhe weg.
  */
-const hinweisBreite = computed(() => breitenmass(props.hinweis ?? '', 170, 0.63))
+const hintFontSize = computed(() => fitFontSize(props.hint ?? '', 170, 0.63))
 </script>
 
 <template>
@@ -84,16 +84,16 @@ const hinweisBreite = computed(() => breitenmass(props.hinweis ?? '', 170, 0.63)
     type="button"
     class="taste"
     :class="[
-      `taste--${breite ?? 'gross'}`,
-      `taste--${art ?? 'neutral'}`,
-      { 'taste--aus': gesperrt, 'taste--tut': arbeitet },
+      `taste--${width ?? 'gross'}`,
+      `taste--${kind ?? 'neutral'}`,
+      { 'taste--aus': locked, 'taste--tut': busy },
     ]"
-    :disabled="gesperrt || arbeitet"
-    :style="{ '--wort-breite': wortBreite, '--hinweis-breite': hinweisBreite }"
+    :disabled="locked || busy"
+    :style="{ '--wort-breite': labelFontSize, '--hinweis-breite': hintFontSize }"
   >
-    <span class="taste__wort">{{ beschriftung }}</span>
-    <span v-if="hinweis" class="taste__hinweis">{{ hinweis }}</span>
-    <span v-if="taste" class="taste__taste" aria-hidden="true">{{ taste }}</span>
+    <span class="taste__wort">{{ label }}</span>
+    <span v-if="hint" class="taste__hinweis">{{ hint }}</span>
+    <span v-if="key" class="taste__taste" aria-hidden="true">{{ key }}</span>
   </button>
 </template>
 
