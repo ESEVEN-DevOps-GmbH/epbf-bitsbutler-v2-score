@@ -69,6 +69,19 @@ const tafel = computed(() => data.value?.tische ?? null)
 const unbekannt = computed(() => data.value?.unbekannt ?? false)
 const tische = computed(() => tafel.value?.tables ?? [])
 
+/**
+ * KEINE FRISCHE ANTWORT — WEDER BESTÄTIGT NOCH WIDERLEGT.
+ *
+ * `tafel.value` ist `null` in ZWEI Fällen: die Veranstaltung gibt es
+ * wirklich nicht (`unbekannt`, ein 404 — eine ECHTE Antwort), oder der
+ * Abruf ist am Netz gescheitert (siehe `catch` oben, kein 404). Nur der
+ * zweite Fall ist ein Netzfehler und keine Auskunft; er kommt seit dem
+ * Service Worker (sw.ts) auch bei einem Neuladen OHNE Netz vor — vorher
+ * lud diese Seite ohne Netz gar nicht erst, also konnte dieser Zweig nie
+ * mit leeren Händen laufen.
+ */
+const keineAuskunft = computed(() => tafel.value === null && !unbekannt.value)
+
 /** Der Schlüssel trägt die Veranstaltung: ein Schirm überlebt das Turnier. */
 const merkschluessel = `bb.board.table.${eventId}`
 
@@ -369,12 +382,16 @@ function taste(ev: KeyboardEvent) {
  */
 onMounted(() => {
   const merk = gemerkt()
-  if (merk !== null && tische.value.some(t => t.number === merk)) {
+  if (merk !== null && (keineAuskunft.value || tische.value.some(t => t.number === merk))) {
+    // Ohne Netz (`keineAuskunft`) ist dieser Sprung ein VERTRAUENSVORSCHUSS
+    // — siehe die Begründung an `keineAuskunft` oben und dieselbe
+    // Unterscheidung auf board/index.vue. Die Tafel selbst weiss, wie sie
+    // sich ohne Antwort verhält (siehe [table].vue, `tafelGelesen`).
     navigateTo(`/board/${eventId}/${merk}`, { replace: true })
     return
   }
 
-  if (merk !== null) {
+  if (merk !== null && !keineAuskunft.value) {
     /*
      * DIESES GERÄT HATTE IN DIESER VERANSTALTUNG SCHON EINEN TISCH — UND
      * ER IST WEG. Dann wird NICHT vorgeschlagen.
@@ -383,10 +400,13 @@ onMounted(() => {
      * Nummer aus DIESER gerade als ungültig verworfen wurde, wäre der
      * schlechtere von zwei Vorschlägen — und zwar sichtbar: wer hier
      * steht, hat gerade erlebt, dass eine Tischnummer verschwunden ist.
+     *
+     * NUR MIT EINER ECHTEN ANTWORT (`!keineAuskunft`): ein Netzfehler ist
+     * kein Beleg dafür, dass der Tisch verschwunden ist, siehe oben.
      */
     window.localStorage.removeItem(merkschluessel)
   }
-  else {
+  else if (merk === null) {
     /*
      * DER VORSCHLAG — UND ER MUSS INS ZIEL FÜHREN.
      *

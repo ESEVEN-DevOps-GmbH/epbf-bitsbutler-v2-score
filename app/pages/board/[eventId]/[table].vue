@@ -89,6 +89,51 @@ const tischNummer = Number.parseInt(String(route.params.table ?? ''), 10)
 const adresse = `/api/events/${encodeURIComponent(eventId)}/tables/${tischNummer}`
 
 /**
+ * DER LETZTE STAND DIESES TISCHES — DAMIT EIN NEULADEN OHNE NETZ IHN FINDET.
+ *
+ * Seit dem 25.09.2026 übersteht ein nicht gesendeter Stand einen Netzausfall
+ * (`merkposten` in useZaehlwerk.ts) — aber nur, solange die Anwendung im
+ * Speicher des Geräts bleibt. Ein NEULADEN ohne Netz kennt bis hierher noch
+ * nicht einmal die PARTIE an diesem Tisch: die kommt aus genau dem Abruf,
+ * der gerade fehlschlägt. Ohne Partie sieht `merkpostenWiederherstellen`
+ * (useZaehlwerk.ts, ausgelöst über den Beobachter auf `partie.value.id`)
+ * nichts, was es wiederherstellen könnte — der Schiedsrichter stünde vor
+ * einer Tafel, die "kein Spiel" zeigt, während am Tisch längst weitergezählt
+ * wird.
+ *
+ * Deshalb legt jeder ERFOLGREICHE Abruf seine Antwort hier ab, tischgenau
+ * und ohne alles, was nicht ohnehin öffentlich wäre: `TableBoard` ist
+ * WÖRTLICH das, was auch ein Zuschauer ohne Anmeldung auf /livescores sieht
+ * (siehe die Begründung weiter oben, "Alles, was auf der Tafel steht…").
+ * Anders als der Personencode in `merkposten` (siehe dort, Fund vom
+ * 25.09.2026, Commit "kein Personencode im Speicher eines Tablets, das
+ * herumliegt") steht hier also nichts, das auf einem herumliegenden Tablet
+ * nichts verloren hätte.
+ */
+function tafelSchluessel(): string {
+  return `bb.board.snapshot.${eventId}.${tischNummer}`
+}
+
+function tafelSpeichern(wert: TableBoard) {
+  try {
+    window.localStorage.setItem(tafelSchluessel(), JSON.stringify(wert))
+  }
+  catch {
+    // Kein Speicher — dann eben ohne dieses Netz, wie zuvor diese Ergänzung.
+  }
+}
+
+function tafelGelesen(): TableBoard | null {
+  try {
+    const roh = window.localStorage.getItem(tafelSchluessel())
+    return roh ? JSON.parse(roh) as TableBoard : null
+  }
+  catch {
+    return null
+  }
+}
+
+/**
  * Der erste Stand kommt vom Server, damit der Bildschirm nach dem Einschalten
  * sofort etwas zeigt und nicht erst nach dem ersten Abruf des Browsers.
  *
@@ -97,15 +142,27 @@ const adresse = `/api/events/${encodeURIComponent(eventId)}/tables/${tischNummer
  * bliebe — niemand geht durch die Halle und lädt zwanzig Bildschirme neu.
  * Nur eine Veranstaltung, die es nicht gibt, wird gemeldet: das ist ein
  * Vertipper in der Adresse, und den soll der Aufbau sehen.
+ *
+ * SCHLÄGT ER FEHL UND IST ES KEIN VERTIPPER, ist es entweder ein Backend, das
+ * gerade neu startet, oder — seit dem Service Worker — ein Gerät, das ganz
+ * ohne Netz neu geladen wurde. In beiden Fällen ist der zuletzt gespeicherte
+ * Stand DIESES Tisches (`tafelGelesen`) die bessere Grundlage als gar keine:
+ * er trägt die Partie, ohne die weder gezählt noch ein Merkposten
+ * wiedergefunden werden kann. `import.meta.client`, weil es serverseitig
+ * (beim gewöhnlichen SSR-Aufruf) kein `localStorage` gibt und ein
+ * fehlschlagender Abruf dort ohnehin am Backend liegt, nicht am Netz dieses
+ * einen Geräts.
  */
 const { data: erste } = await useAsyncData(
   `board-${eventId}-${tischNummer}`,
   async () => {
     try {
-      return { tafel: await $fetch<TableBoard>(adresse), unbekannt: false }
+      return { tafel: await $fetch<TableBoard>(adresse), unbekannt: false, ausSpeicher: false }
     }
     catch (fehler: unknown) {
-      return { tafel: null, unbekannt: (fehler as { statusCode?: number }).statusCode === 404 }
+      const unbekannt = (fehler as { statusCode?: number }).statusCode === 404
+      const gespeichert = !unbekannt && import.meta.client ? tafelGelesen() : null
+      return { tafel: gespeichert, unbekannt, ausSpeicher: gespeichert !== null }
     }
   },
 )
@@ -114,13 +171,35 @@ const stand = ref<TableBoard | null>(erste.value?.tafel ?? null)
 const unbekannt = ref(erste.value?.unbekannt ?? false)
 
 /**
- * Wann zuletzt eine Antwort ankam. Grundlage für den Verbindungspunkt unten
- * rechts — und der einzige Grund, warum der überhaupt nötig ist: wer vor der
- * Tafel steht, soll unterscheiden können zwischen "es steht 5:4" und "es
- * stand vor einer Viertelstunde 5:4".
+ * Zeigt die Tafel gerade den gespeicherten Stand aus `tafelGelesen`, und
+ * nicht eine Antwort, die dieses Gerät wirklich gerade bekommen hat?
+ *
+ * Sie hält `zuletzt` unten ausdrücklich auf `null` — der gespeicherte Stand
+ * ist per Definition nicht "gerade eben angekommen", und der
+ * Verbindungspunkt (`verbindungWeg`) soll genau deshalb nach der üblichen
+ * Frist "no connection" zeigen, auch wenn oben längst wieder eine Zahl
+ * steht.
  */
-const zuletzt = ref<number | null>(erste.value?.tafel ? Date.now() : null)
+const ausSpeicher = ref(erste.value?.ausSpeicher ?? false)
+
+/**
+ * Wann zuletzt eine ECHTE Antwort vom Server ankam. Grundlage für den
+ * Verbindungspunkt unten rechts — und der einzige Grund, warum der
+ * überhaupt nötig ist: wer vor der Tafel steht, soll unterscheiden können
+ * zwischen "es steht 5:4" und "es stand vor einer Viertelstunde 5:4".
+ *
+ * Bleibt `null`, solange der erste Stand aus dem Speicher kommt
+ * (`ausSpeicher`) — sonst zeigte die Tafel eine soeben verstrichene Sekunde,
+ * obwohl in Wahrheit niemand geantwortet hat.
+ */
+const zuletzt = ref<number | null>(erste.value?.tafel && !ausSpeicher.value ? Date.now() : null)
 const jetzt = ref(Date.now())
+
+/**
+ * Wann diese Seite aufgebaut wurde — die Grundlage für `verbindungWeg`,
+ * solange `zuletzt` noch nie gesetzt war. Siehe dort.
+ */
+const gestartet = Date.now()
 
 const ABSTAND_MS = 10_000
 
@@ -137,7 +216,9 @@ async function tafelHolen() {
   try {
     stand.value = await $fetch<TableBoard>(adresse)
     unbekannt.value = false
+    ausSpeicher.value = false
     zuletzt.value = Date.now()
+    tafelSpeichern(stand.value)
   }
   catch (fehler: unknown) {
     // Eine Veranstaltung, die es nicht (mehr) gibt, ist die Ausnahme: daran
@@ -766,15 +847,25 @@ onBeforeUnmount(() => {
 
 const partie = computed(() => stand.value?.match ?? null)
 
-/** Sekunden seit dem letzten Abruf — die Grundlage für "die Anzeige steht". */
-const alter = computed(() =>
-  zuletzt.value === null ? null : Math.floor((jetzt.value - zuletzt.value) / 1000))
+/**
+ * Sekunden seit dem letzten ECHTEN Abruf — die Grundlage für "die Anzeige
+ * steht".
+ *
+ * GERECHNET AB `zuletzt`, UND SOLANGE DAS NOCH NIE GESETZT WAR, AB
+ * `gestartet` — seit es einen Service Worker gibt, kann diese Seite OHNE
+ * JEDE erfolgreiche Antwort starten (siehe `tafelGelesen` oben): ohne diesen
+ * Rückfall bliebe `alter` für immer `null` und der Verbindungspunkt unten
+ * für immer stumm, obwohl seit dem Einschalten kein einziger Abruf gelungen
+ * ist. Vorher konnte dieser Fall gar nicht eintreten: ohne Netz lud die
+ * Seite selbst nicht, also lief dieser Code nie mit leeren Händen los.
+ */
+const alter = computed(() => Math.floor((jetzt.value - (zuletzt.value ?? gestartet)) / 1000))
 
 /**
  * Erst nach dem dritten verpassten Abruf. Ein einzelner Aussetzer ist normal
  * und soll nicht blinken; eine halbe Minute Stille ist es nicht.
  */
-const verbindungWeg = computed(() => (alter.value ?? 0) > (ABSTAND_MS / 1000) * 3)
+const verbindungWeg = computed(() => alter.value > (ABSTAND_MS / 1000) * 3)
 
 /**
  * DIE AUSZEIT-UHREN — eine je Spieler, und beide dürfen nebeneinander laufen.

@@ -65,7 +65,7 @@ const wechselwunsch = computed(() => route.query.switch !== undefined)
  */
 const seite = computed(() => String(route.query.site ?? '').trim())
 
-const { data, refresh } = await useAsyncData(
+const { data, error, refresh } = await useAsyncData(
   () => `board-events:${seite.value || '*'}`,
   () => $fetch<BoardEventList>('/api/board/events', {
     query: seite.value ? { site: seite.value } : undefined,
@@ -268,12 +268,32 @@ let uhr: ReturnType<typeof setInterval> | null = null
 
 onMounted(() => {
   const merk = gemerkt()
+
+  /*
+   * KEINE FRISCHE ANTWORT — WEDER BESTÄTIGT NOCH WIDERLEGT.
+   *
+   * `events.value` bleibt bei einem gescheiterten Abruf auf dem `default`
+   * aus `useAsyncData` stehen, also leer — GENAU dieselbe Form wie ein
+   * ehrlicher Montagmorgen ohne laufende Veranstaltung. Ohne diese
+   * Unterscheidung sähe ein Neuladen ohne Netz (siehe sw.ts) wie eine
+   * bestätigt leere Liste aus, und der Block darunter würfe den gemerkten
+   * Schirm weg — nicht weil die Veranstaltung vorbei wäre, sondern weil
+   * niemand gefragt werden konnte. Das Gerät verlöre seine Zuordnung wegen
+   * eines Netzausfalls, den es doch gerade übersteht.
+   */
+  const keineAuskunft = error.value != null
   const steht = merk !== null && events.value.some(v => v.id === merk)
 
-  if (!wechselwunsch.value && steht) {
+  if (!wechselwunsch.value && merk !== null && (steht || keineAuskunft)) {
     // `replace`: ohne das läge diese Seite im Verlauf, und die Zurück-Taste
     // landete auf ihr — die sofort wieder wegspringt. Eine Schleife, aus der
     // auf einem Gerät ohne Tastatur niemand herauskommt.
+    //
+    // Ohne Netz (`keineAuskunft`) ist dieser Sprung ein VERTRAUENSVORSCHUSS:
+    // die Zielseite selbst weiss, wie sie sich ohne Antwort verhält (siehe
+    // dort, dieselbe Unterscheidung), und ein Gerät, das an seiner
+    // Veranstaltung bleibt, ist die bessere Auskunft als eine Liste, die
+    // mangels Netz ohnehin leer wäre.
     navigateTo(`/board/${merk}`, { replace: true })
     return
   }
@@ -285,10 +305,14 @@ onMounted(() => {
    * Jahr, und beim Wechsel zurück dorthin (Liste, gleicher Name, neues Jahr)
    * hinge daran eine Kennung, die niemand mehr nachvollziehen kann.
    *
+   * NUR MIT EINER ECHTEN, ERFOLGREICHEN ANTWORT (`!keineAuskunft`): ein
+   * Netzfehler ist kein Beleg dafür, dass die Veranstaltung vorbei ist,
+   * siehe oben.
+   *
    * Nicht beim Wechselwunsch: wer nur nachsehen will, was sonst noch läuft,
    * und es sich anders überlegt, soll sein Gerät unverändert vorfinden.
    */
-  if (!wechselwunsch.value && merk !== null && !steht) {
+  if (!wechselwunsch.value && merk !== null && !steht && !keineAuskunft) {
     try {
       window.localStorage.removeItem(merkschluessel)
     }
