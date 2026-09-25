@@ -186,6 +186,12 @@ export default defineEventHandler(async (event): Promise<BoardEventList> => {
    * was sichtbar ist -- er kann also nichts oeffnen, was ohne ihn
    * verschlossen waere. Wer ihn raet, sieht dieselbe Liste wie jeder
    * andere auch. Die Wache bleibt der Tafelcode.
+   *
+   * Ein unbekannter Schluessel liefert eine LEERE Liste, und die Seite
+   * sagt dasselbe wie bei einer Instanz ohne laufende Veranstaltung:
+   * "No event is open right now". Das ist keine Nachlaessigkeit --
+   * unterschiede sie die beiden Faelle, waere sie eine Auskunft darueber,
+   * WELCHE Schluessel es gibt.
    */
   const ausDerAnfrage = String(getQuery(event).site ?? '').trim()
   const seite = ausDerAnfrage || String(process.env.BB_SITE ?? '')
