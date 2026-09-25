@@ -1,0 +1,40 @@
+name: Release
+
+# Der Ausloeser ist main, weil main hier tatsaechlich der Arbeitsbranch ist --
+# wie bei epbf-website und anders als bei den beiden aelteren
+# Schwesterprojekten. Siehe release.config.js.
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quellcode auschecken
+        uses: actions/checkout@v4
+        with:
+          # semantic-release braucht die volle Historie, um Commits seit dem
+          # letzten Tag zu lesen — ein flacher Checkout zeigt nur den letzten.
+          fetch-depth: 0
+
+      - name: Node einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Abhängigkeiten installieren
+        run: npm ci
+
+      - name: semantic-release ausführen
+        # Das eingebaute GITHUB_TOKEN reicht aus; ein eigenes Geheimnis wird
+        # hier bewusst nicht eingetragen.
+        run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
