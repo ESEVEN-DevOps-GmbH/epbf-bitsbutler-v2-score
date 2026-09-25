@@ -2202,23 +2202,55 @@ useHead({
           Moment die ganze Zeile, und die Bewegung fällt mehr auf als der
           Ausfall.
 
-          SEIT DER STAND SOFORT HOCHGEHT, HAT ER DREI ZUSTÄNDE statt zwei.
-          Der mittlere ist der neue und der wichtigste: die Zahl oben steht
-          schon, aber die Anwendung hat sie noch nicht bestätigt. Er bekommt
-          KEINEN Text — "sending" neben einem laufenden Halbfinale wäre
-          Innenleben, und die Auskunft steht ohnehin deutlicher am Stand
-          selbst, der in diesem Moment blasser wird. Der Ausfall behält
-          seinen Satz: er betrifft nicht mehr nur den letzten Tipp.
+          SEIT DER STAND SOFORT HOCHGEHT, HAT ER MEHR ALS ZWEI ZUSTÄNDE.
+          `--offen` ist der kurze: die Zahl oben steht schon, aber die
+          Anwendung hat sie noch nicht bestätigt. Er bekommt KEINEN Text —
+          "sending" neben einem laufenden Halbfinale wäre Innenleben, und die
+          Auskunft steht ohnehin deutlicher am Stand selbst, der in diesem
+          Moment blasser wird.
+
+          `--pending` IST DER LANGE ZUSTAND, UND ER BRAUCHT EINEN SATZ.
+          `zaehlwerk.netzausfall` steht, solange ein Stand an einem Netzfehler
+          gescheitert ist und auf seine Wiederholung wartet (siehe
+          `merkposten` in useZaehlwerk.ts) — das kann Minuten dauern, und
+          "die Zahl ist blasser" reicht dafür nicht: aus fünf Metern sieht
+          blass wie normal aus. Der Satz sagt deshalb ausdrücklich, dass die
+          Zahl oben zwar richtig ist, die Anwendung sie aber noch nicht
+          gesehen hat — ohne eine Bewegung (kein Kringel, siehe
+          WIMPERNSCHLAG_MS in useZaehlwerk.ts) und ohne den Spielbetrieb zu
+          unterbrechen: gezählt wird weiter, auch während der Satz steht.
+
+          Er geht vor `--lost`, denn er ist die genauere Auskunft: ein
+          Netzausfall zeigt sich hier oft VOR den drei verpassten Abrufen,
+          die `verbindungWeg` erst nach dreissig Sekunden auslösen. Steht
+          kein Stand mehr aus, aber die Abrufe bleiben trotzdem aus, sagt
+          `--lost` weiter "no connection" — das betrifft dann die ganze
+          Tafel und nicht nur den letzten Tipp.
+
+          `zaehlwerk.ergebnisAusstehend` GEHT VOR ALLEM ANDEREN. Sie meint
+          "beenden"/"aufgeben" — die Partie ist am Tisch entschieden, nur
+          die Anwendung weiss es noch nicht, weil auch DIESER Aufruf an
+          einem Netzfehler gescheitert ist (siehe die Begründung vor
+          `beenden` in useZaehlwerk.ts). Der Satz sagt ausdrücklich NICHT
+          "finished" — das würde behaupten, was noch nicht gilt —, sondern
+          nur, dass ein Ergebnis hier bereitliegt. Währenddessen ist die
+          Leiste ohnehin gesperrt (`laeuft`); dieser Satz ist die einzige
+          Auskunft, WARUM sie es noch ist.
         -->
         <span
           class="board__link"
           :class="{
-            'board__link--lost': verbindungWeg,
-            'board__link--offen': !verbindungWeg && zaehlwerk.unbestaetigt.value,
+            'board__link--pending': zaehlwerk.ergebnisAusstehend.value || zaehlwerk.netzausfall.value,
+            'board__link--lost': !zaehlwerk.ergebnisAusstehend.value && !zaehlwerk.netzausfall.value
+              && verbindungWeg,
+            'board__link--offen': !zaehlwerk.ergebnisAusstehend.value && !zaehlwerk.netzausfall.value
+              && !verbindungWeg && zaehlwerk.unbestaetigt.value,
           }"
         >
           <span class="board__dot" aria-hidden="true" />
-          <span v-if="verbindungWeg">no connection</span>
+          <span v-if="zaehlwerk.ergebnisAusstehend.value">result pending</span>
+          <span v-else-if="zaehlwerk.netzausfall.value">not sent yet</span>
+          <span v-else-if="verbindungWeg">no connection</span>
         </span>
       </footer>
     </template>
@@ -2923,6 +2955,22 @@ useHead({
 }
 
 .board__link--lost .board__dot {
+  background: var(--color-warning, #fc8c3a);
+}
+
+/*
+ * DIESELBE WARNFARBE WIE `--lost`, UND ABSICHTLICH — beides ist ein
+ * Netzproblem, nur mit einer genaueren Ursache; der Unterschied steht im
+ * Satz daneben und nicht in einer eigenen Farbe. KEINE ANIMATION: ein
+ * Pulsieren wäre die Bewegung, die WIMPERNSCHLAG_MS in useZaehlwerk.ts
+ * ausdrücklich vermeidet — sie zieht aus fünf Metern mehr Blicke auf sich
+ * als der Satzstand daneben.
+ */
+.board__link--pending {
+  color: var(--color-warning, #fc8c3a);
+}
+
+.board__link--pending .board__dot {
   background: var(--color-warning, #fc8c3a);
 }
 

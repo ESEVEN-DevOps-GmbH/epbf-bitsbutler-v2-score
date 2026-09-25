@@ -122,6 +122,136 @@ interface Vierzehnfassung {
 }
 
 /**
+ * Was `PUT /matches/{id}/score` beantwortet — einmal benannt, weil sowohl
+ * `setzen` als auch die Netzwiederholung bei einem Merkposten (siehe
+ * `merkposten` in `useZaehlwerk`) dieselbe Form brauchen: ein Wiederholungs-
+ * versuch schickt denselben Rumpf ein zweites Mal und erwartet dieselbe
+ * Antwort.
+ */
+interface StandAntwort {
+  scoreA: number, scoreB: number
+  ballsOnTable?: number | null, foulsA?: number | null, foulsB?: number | null
+  runA?: number | null, highA?: number | null
+  runB?: number | null, highB?: number | null
+}
+
+/**
+ * Ein Schreibvorgang auf den Stand, so vollständig, dass er sich UNVERÄNDERT
+ * wiederholen lässt — der Rumpf, was bei Ankunft geschieht, und was bei
+ * einer (fachlichen) Abweisung zurückzudrehen ist. Siehe `merkposten`.
+ */
+interface StandAuftrag {
+  was: () => Promise<StandAntwort>
+  angekommen: (antwort: StandAntwort) => void
+  zurueckdrehen: () => void
+}
+
+/**
+ * DER MERKPOSTEN, WIE ER EIN NEULADEN ÜBERLEBT — je Partie höchstens EINER.
+ *
+ * Ein Merkposten im Arbeitsspeicher übersteht einen Netzausfall, aber kein
+ * Neuladen: ein Tablet in einer Halle wird gewischt, der Browser räumt
+ * Speicher auf, das Gerät geht kurz aus — und danach ist der ganze
+ * Zustand dieser Datei weg, lautlos, ohne dass irgendwer es sieht. Deshalb
+ * liegt hier ab, WAS zu tun ist, wenn die Verbindung zurück ist — nicht
+ * mehr, denn Funktionen (`was`, `angekommen`, `zurueckdrehen` von
+ * `StandAuftrag`) lassen sich nicht in `localStorage` schreiben.
+ *
+ * EIN SCHLÜSSEL JE PARTIE (`merkpostenSchluessel`), damit zwei Tafeln auf
+ * demselben Gerät sich nicht ins Gehege kommen und ein gemerktes Ende einen
+ * gemerkten Stand am selben Schlüssel ERSETZT statt daneben abzulegen —
+ * dieselbe Haltung wie beim Merkposten im Arbeitsspeicher (siehe dort,
+ * "EIN GEMERKTES ERGEBNIS ERSETZT EINEN GEMERKTEN STAND").
+ */
+type GespeicherterMerkposten = GespeicherterStand | GespeichertesEnde
+
+/** Ein Stand, der noch hinaus muss — siehe `merkposten` in `useZaehlwerk`. */
+interface GespeicherterStand {
+  art: 'stand'
+  /**
+   * Der Stand, AUF DEM dieser Merkposten aufbaute — nicht der, den er
+   * schickt. Die Grundlage des Abgleichs beim Wiederlesen, siehe
+   * `merkpostenWiederherstellen`: eine absolute Zahl sagt für sich nicht,
+   * worauf sie aufbaute, und ohne diese Angabe ließe sich nicht erkennen,
+   * ob der Server inzwischen etwas anderes führt.
+   */
+  basis: Standpaar
+  neu: Standpaar
+  ruecknahme: boolean
+  vierzehn?: Vierzehnfassung
+}
+
+/** Ein Ende (`beenden`/`aufgeben`), das noch hinaus muss. */
+interface GespeichertesEnde {
+  art: 'ende'
+  pfad: 'confirm' | 'result'
+  /**
+   * Nur bei `pfad: 'result'` gesetzt — `confirm` hat keinen Rumpf, siehe
+   * `beenden`.
+   */
+  rumpf?: {
+    winner: Seite, scoreA: number, scoreB: number
+    resolution: 'WALKOVER' | 'FORFEIT', boardPin?: string
+  }
+  /**
+   * Der Stand, auf dem `rumpf.scoreA`/`scoreB` beruhen — wie `basis` bei
+   * {@link GespeicherterStand}, und aus demselben Grund. `null` bei
+   * WALKOVER: dort steht im Rumpf immer 0:0, unabhängig vom tatsächlichen
+   * Stand, und ein Vergleich gegen "0:0" wäre kein Abgleich, sondern ein
+   * Zufallstreffer.
+   */
+  basis: Standpaar | null
+}
+
+/**
+ * Der Schlüssel EINER Partie — nicht des Tisches und nicht des Turniers:
+ * die nächste Partie an diesem Tisch soll den Merkposten der vorigen weder
+ * erben noch sehen.
+ */
+function merkpostenSchluessel(matchId: string): string {
+  return `bb.score.pending.${matchId}`
+}
+
+/**
+ * Ablegen, lesen, löschen — je mit `try`/`catch` und ohne eigene Meldung.
+ *
+ * DIESELBE HALTUNG WIE `merkerLesen`/`zurueckZurWahl` IN [table].vue: ein
+ * privater Modus ohne Speicher oder ein Kontingent, das voll ist, soll den
+ * Zählenden nicht aufhalten — der Merkposten lebt dann eben nur im
+ * Arbeitsspeicher, wie vor dieser Ergänzung. Dieselbe Zeile fängt auch das
+ * serverseitige Rendern ab, wo es `window` gar nicht gibt: der Zugriff
+ * darauf wirft dann eine `ReferenceError`, die hier genauso geschluckt
+ * wird.
+ */
+function merkpostenSpeichern(matchId: string, wert: GespeicherterMerkposten) {
+  try {
+    window.localStorage.setItem(merkpostenSchluessel(matchId), JSON.stringify(wert))
+  }
+  catch {
+    // Kein Speicher — siehe oben.
+  }
+}
+
+function merkpostenGelesen(matchId: string): GespeicherterMerkposten | null {
+  try {
+    const roh = window.localStorage.getItem(merkpostenSchluessel(matchId))
+    return roh ? JSON.parse(roh) as GespeicherterMerkposten : null
+  }
+  catch {
+    return null
+  }
+}
+
+function merkpostenGeloescht(matchId: string) {
+  try {
+    window.localStorage.removeItem(merkpostenSchluessel(matchId))
+  }
+  catch {
+    // Kein Speicher — siehe oben.
+  }
+}
+
+/**
  * Eine Seite, deren Trikotkontrolle noch aussteht — mit dem Namen dessen,
  * der dort steht. Genau das, was `competition.uniform_blocks_start` liefert.
  */
@@ -448,6 +578,200 @@ export function useZaehlwerk(optionen: {
   onScopeDispose(() => {
     if (wimpernUhr) clearTimeout(wimpernUhr)
   })
+
+  /* ----------------------------------------------------------------------
+   * DER NETZFEHLER — GEMERKT UND WIEDERHOLT, NICHT ABGEWIESEN
+   * ----------------------------------------------------------------------
+   *
+   * Der Auftrag vom 25.09.2026: die Tafel soll weiterzählen, wenn das Netz
+   * in der Halle ausfällt, und den Stand nachholen, sobald die Verbindung
+   * zurück ist. `vorgemerkt` darüber löst das für einen Aussetzer von ein
+   * paar Sekunden schon; es löst es nicht für einen Ausfall von Minuten,
+   * denn `losschicken` gab bis hierher jeden gescheiterten Schreibvorgang
+   * verloren — gleich, OB die Anwendung nein gesagt hat oder ob sie die
+   * Frage nie zu Gesicht bekam.
+   *
+   * GENAU DIESE ZWEI FÄLLE WERDEN JETZT GETRENNT (`istNetzfehler`, am Ende
+   * der Datei, wo `alsFehler` dieselbe Antwort schon zerlegt):
+   *
+   *   FACHLICH   Die Anwendung hat geantwortet und NEIN gesagt (400, 403,
+   *              409 mit einer Fachkennung wie SET_RACE_ALREADY_REACHED).
+   *              Das bleibt, wie es war: Anzeige zurückgedreht, rote Zeile,
+   *              fertig — ein Wiederholen machte aus einem Nein kein Ja,
+   *              sondern eine Schleife, die nie ankommt.
+   *   NETZFEHLER Keine Verbindung, eine Zeitüberschreitung (`SENDEFRIST_MS`)
+   *              oder ein 502/503/504 — die Frage ist nie angekommen oder
+   *              nie beantwortet worden. Hier, und nur hier, lohnt sich ein
+   *              zweiter Versuch: die Anwendung hat nichts abgelehnt, sie
+   *              hat nichts gesehen.
+   *
+   * KEINE SCHLANGE, EIN MERKPOSTEN. `losschicken` verwirft mit Absicht jede
+   * überholte Antwort (siehe dort, "VERWORFEN: die Schreibvorgänge in einer
+   * Schlange") — dieselbe Haltung gilt hier: es gibt höchstens EINEN Stand,
+   * der noch hinaus soll, nämlich den jüngsten. `merkposten` ist deshalb
+   * eine einzelne Variable und kein Feld, in das eingereiht wird; ein neuer
+   * Tastendruck ERSETZT sie, bevor er selbst losgeschickt wird (siehe
+   * `merkpostenAufraeumen` in `setzen`), und der alte Versuch wird dabei
+   * nicht nachgeholt, sondern fallengelassen — genau wie eine überholte
+   * Antwort fallengelassen wird.
+   *
+   * NUR DIE PUNKTE. `setzen` ist die einzige Stelle, die `netzfehler` an
+   * `losschicken` übergibt. Anstoß, Auszeit und ihre Rücknahme gehen
+   * unverändert in den bestehenden Zweig: ein Schiedsrichtereingriff
+   * verlangt ohnehin eine Serverprüfung und soll bei fehlender Verbindung
+   * ERKENNBAR nicht verfügbar sein — das leistet die bestehende Abweisung
+   * schon —, statt Minuten später heimlich nachzuwirken, wenn niemand mehr
+   * daran denkt.
+   *
+   * WACHSENDE ABSTÄNDE UND KEIN `navigator.onLine`. Die Eigenschaft meldet
+   * "online", sobald ein Netzwerkadapter aktiv ist — unabhängig davon, ob er
+   * irgendwohin kommt. Ein Reiserouter, der sein WLAN gerade neu aufbaut,
+   * bevor er selbst wieder eine Adresse hat, meldet dem Tablet "online" und
+   * liefert trotzdem keine Antwort; das Ereignis wäre also ausgerechnet in
+   * dem Moment falsch, in dem es gebraucht wird. Ein wiederholter Versuch
+   * prüft stattdessen die Leitung, auf die es ankommt: ob der Server selbst
+   * antwortet. Die Abstände wachsen (2 s, 5 s, 10 s, danach alle 20 s),
+   * damit ein kurzer Aussetzer schnell nachgeholt wird und ein langer
+   * Ausfall die Halle nicht mit Anfragen flutet, die ohnehin ins Leere
+   * gehen.
+   */
+  let merkposten: { matchId: string, auftrag: StandAuftrag } | null = null
+  let wiederholUhr: ReturnType<typeof setTimeout> | null = null
+  let wiederholVersuch = 0
+  const NETZ_WIEDERHOLUNG_MS = [2_000, 5_000, 10_000, 20_000]
+
+  /**
+   * Steht ein Stand noch aus, weil eine Anfrage an einem Netzfehler
+   * gescheitert ist?
+   *
+   * Anders als `unbestaetigt` (ein halber Wimpernschlag, siehe oben) ist das
+   * die Auskunft für den LANGEN Ausfall — die Tafel zeigt sie dauerhaft an
+   * (siehe [table].vue): "diese Zahl ist hier richtig, aber die Anwendung
+   * weiss noch nichts davon".
+   */
+  const netzausfall = ref(false)
+
+  /**
+   * Einen gescheiterten Stand loswerden — bei Erfolg, bei einer (jetzt doch
+   * eintreffenden) fachlichen Abweisung, oder weil ein neuerer Tipp ihn
+   * ersetzt.
+   *
+   * RÄUMT AUCH DEN GESPEICHERTEN AUF, und zwar IMMER: ein Merkposten, den
+   * niemand mehr abräumt, ist ein Stand, der zwei Wochen später an einem
+   * anderen Turnier wieder auftaucht, sobald an diesem Gerät zufällig
+   * dieselbe Partien-Kennung vorkäme — praktisch ausgeschlossen bei UUIDs,
+   * aber der Grund, aus dem hier aufgeräumt wird und nicht bloß "meistens".
+   */
+  function merkpostenAufraeumen() {
+    if (wiederholUhr) { clearTimeout(wiederholUhr); wiederholUhr = null }
+    if (merkposten) merkpostenGeloescht(merkposten.matchId)
+    merkposten = null
+    wiederholVersuch = 0
+    netzausfall.value = false
+  }
+
+  /** Den nächsten Wiederholungsversuch für den aktuellen Merkposten einplanen. */
+  function wiederholungPlanen() {
+    if (wiederholUhr) clearTimeout(wiederholUhr)
+    const wartezeit = NETZ_WIEDERHOLUNG_MS[
+      Math.min(wiederholVersuch, NETZ_WIEDERHOLUNG_MS.length - 1)
+    ]!
+    wiederholUhr = setTimeout(() => {
+      wiederholUhr = null
+      const eintrag = merkposten
+      if (!eintrag) return
+      wiederholVersuch++
+      // Derselbe Auftrag geht unverändert ein weiteres Mal hinaus — siehe
+      // "EIN AUFRUF UND NICHT ZWEI" bei `setzen`. Scheitert er wieder an
+      // einem Netzfehler, plant er sich hier selbst erneut ein; scheitert er
+      // fachlich, greift `zurueckdrehen` im Auftrag selbst.
+      losschicken({ ...eintrag.auftrag, netzfehler: wiederholungPlanen })
+    }, wartezeit)
+  }
+
+  /**
+   * Ein Stand ist an einem Netzfehler gescheitert — hier merken (im
+   * Arbeitsspeicher UND in `localStorage`, siehe `GespeicherterStand`) und
+   * den ersten Wiederholungsversuch anstossen.
+   */
+  function merkpostenSenden(matchId: string, auftrag: StandAuftrag, gespeichert: GespeicherterStand) {
+    merkposten = { matchId, auftrag }
+    wiederholVersuch = 0
+    netzausfall.value = true
+    merkpostenSpeichern(matchId, gespeichert)
+    wiederholungPlanen()
+  }
+
+  /**
+   * BEIM LADEN NACHSEHEN: LIEGT FÜR DIESE PARTIE EIN NICHT ANGEKOMMENER
+   * STAND ODER EIN NICHT ANGEKOMMENES ENDE?
+   *
+   * Aufgerufen aus dem Beobachter auf `partie.value?.id` weiter unten —
+   * FÜR JEDE Partie, die an diesem Tisch neu erscheint, nicht nur beim
+   * allerersten Laden. Ein Gerät, das mitten in einer Partie neu geladen
+   * wird (der häufigste Fall: jemand wischt das Tablet), sieht dieselbe
+   * Partien-Kennung wie vorher — und `localStorage` hat den Merkposten die
+   * ganze Zeit gehalten, auch wenn der Arbeitsspeicher gerade neu
+   * aufgesetzt wurde.
+   *
+   * DER ABGLEICH GEGEN DEN AKTUELLEN SERVERSTAND STEHT BEI DEN BEIDEN
+   * WIEDERHERSTELLUNGEN SELBST (`merkposten`/`ergebnis`), NICHT HIER —
+   * beide brauchen dafür etwas anderes (einen Stand bzw. gar nichts).
+   */
+  function merkpostenWiederherstellen(matchId: string) {
+    const gespeichert = merkpostenGelesen(matchId)
+    if (!gespeichert) return
+    if (gespeichert.art === 'ende') {
+      ergebnisWiederherstellen(matchId, gespeichert)
+      return
+    }
+    standWiederherstellen(matchId, gespeichert)
+  }
+
+  /**
+   * Einen gespeicherten Stand wiederherstellen — oder verwerfen.
+   *
+   * DER ABGLEICH GEGEN `basis`, UND WARUM ER VOR ALLEM ANDEREN STEHT: der
+   * gespeicherte Stand ist ABSOLUT (siehe der Kopf der Datei, "score wird
+   * ABSOLUT übertragen") — ihn einfach erneut zu schicken, würde JEDE
+   * Änderung überschreiben, die seit dem Netzausfall geschehen ist, gleich
+   * ob sie von der Turnierleitung kam oder von einem zweiten Gerät. `basis`
+   * ist der Stand, auf dem dieser Merkposten aufbaute; stimmt er nicht mehr
+   * mit dem überein, was der Server JETZT führt, hat sich zwischenzeitlich
+   * etwas geändert, von dem dieses Gerät nichts weiß — und dann gilt die
+   * Regel dieser ganzen Datei: gezeigt wird, was die Anwendung zuletzt
+   * nachweislich führte, nicht, was das Gerät sich zwischendurch gedacht
+   * hat. Der Merkposten wird verworfen, NICHT gesendet.
+   */
+  function standWiederherstellen(matchId: string, gespeichert: GespeicherterStand) {
+    const m = partie.value
+    if (!m) return
+    const aktuell: Standpaar = { A: rohstand(m, 'A'), B: rohstand(m, 'B') }
+    if (aktuell.A !== gespeichert.basis.A || aktuell.B !== gespeichert.basis.B) {
+      merkpostenGeloescht(matchId)
+      return
+    }
+
+    // Die Anzeige sofort wiederherstellen — genau das, was `setzen` beim
+    // ersten Tipp auch getan hätte.
+    vorgemerkt.value = { ...gespeichert.neu }
+    if (gespeichert.vierzehn) {
+      lageVorgemerkt.value = {
+        rest: gespeichert.vierzehn.lage.rest,
+        fouls: { ...gespeichert.vierzehn.lage.fouls },
+        lauf: { ...gespeichert.vierzehn.lage.lauf },
+        high: { ...gespeichert.vierzehn.lage.high },
+      }
+      anstossVorgemerkt.value = {
+        first: (anstossStand.value.first ?? gespeichert.vierzehn.amTisch) as Seite,
+        next: gespeichert.vierzehn.amTisch,
+        seit: Date.now(),
+      }
+    }
+
+    const auftrag = standAuftragBauen(m, gespeichert.neu, gespeichert.ruecknahme, gespeichert.vierzehn)
+    merkpostenSenden(matchId, auftrag, gespeichert)
+  }
 
   /**
    * Der Stand, den die Tafel zeigen soll — in drei Schichten.
@@ -855,6 +1179,16 @@ export function useZaehlwerk(optionen: {
    * Auf die KENNUNG und nicht auf das Objekt: `partie` bekommt bei jedem
    * Abruf eine neue Hülle mit demselben Inhalt, und darauf zu horchen
    * hiesse, den Vorgriff alle zehn Sekunden wegzuwerfen.
+   *
+   * `{ immediate: true }` SEIT DEM 25.09.2026 — vorher lief dieser
+   * Beobachter erst bei einem WECHSEL der Partie an diesem Tisch. Für das
+   * Wiederherstellen eines Merkpostens nach einem Neuladen (siehe
+   * `merkpostenWiederherstellen` unten) muss er aber auch beim ALLERERSTEN
+   * Erscheinen einer Partie laufen — genau der Fall bei einem Neuladen,
+   * bei dem die Partie dieselbe bleibt. Für den bisherigen Zweck ändert das
+   * nichts: beim allerersten Aufruf sind `auszeitVorgriff` & Co. ohnehin
+   * schon leer, `merkpostenAufraeumen`/`ergebnisAufraeumen` finden noch
+   * nichts zum Abräumen, und `laeuft` steht schon auf `false`.
    */
   watch(() => partie.value?.id ?? null, (neu, alt) => {
     if (neu === alt) return
@@ -866,7 +1200,22 @@ export function useZaehlwerk(optionen: {
     lageVorgemerkt.value = null
     lageGehalten.value = null
     verlauf.value = []
-  })
+    // Und ein Merkposten erst recht: er wiederholte sonst einen Stand der
+    // alten Partie gegen eine neue, die an diesem Tisch inzwischen steht.
+    merkpostenAufraeumen()
+    // Dasselbe für ein gemerktes Ende — es gehört der Partie, die gerade
+    // vom Tisch geht, und nicht der, die an ihre Stelle tritt. `laeuft`
+    // geht mit: ohne diese Zeile bliebe die Leiste der NEUEN Partie
+    // gesperrt, wenn die alte den Tisch verliess, während ihr Ende noch auf
+    // eine Wiederholung wartete (die Turnierleitung kann eingreifen, auch
+    // wenn dieses Gerät gerade offline war).
+    ergebnisAufraeumen()
+    laeuft.value = false
+
+    // Und erst NACH dem Aufräumen nachsehen, ob für DIESE (neue oder erste)
+    // Partie ein Merkposten aus einem früheren Neuladen bereitliegt.
+    if (neu) merkpostenWiederherstellen(neu)
+  }, { immediate: true })
 
   /* ----------------------------------------------------------------------
    * DIE REIHENFOLGE DER ANTWORTEN
@@ -968,6 +1317,16 @@ export function useZaehlwerk(optionen: {
      * Endpunkts NENNT den Stand, den die Anwendung führt.
      */
     nachfassen?: boolean
+    /**
+     * Was bei einem NETZFEHLER geschehen soll, statt der Anwendungsabweisung
+     * darunter — nur gesetzt, wo ein Netzausfall überbrückt werden soll
+     * (siehe `merkposten`/`setzen`, "DER NETZFEHLER" weiter oben). Bleibt
+     * dieses Feld leer, läuft ein Netzfehler durch denselben Zweig wie jede
+     * fachliche Abweisung: Anzeige zurück, rote Zeile, fertig. `losschicken`
+     * selbst unterscheidet nicht mehr als das — WAS wiederholt wird und WIE
+     * lange, entscheidet allein der Aufrufer.
+     */
+    netzfehler?: () => void
   }) {
     const n = ++letzteNummer
     melden(null)
@@ -995,6 +1354,18 @@ export function useZaehlwerk(optionen: {
         if (n < hoechsteAntwort) return
         hoechsteAntwort = n
         if (n !== letzteNummer) return
+        /*
+         * NETZFEHLER UND NICHT FACHLICH, UND DER AUFRUFER WILL WIEDERHOLEN.
+         * Die Anzeige bleibt unangetastet stehen: kein Zurückdrehen, keine
+         * rote Zeile, kein `wartenEndet` — sie zeigt weiter den vorgemerkten
+         * Stand, bis entweder die Wiederholung durchkommt (dann läuft die
+         * Antwort oben durch den ERFOLGS-Zweig) oder die Anwendung ihn
+         * irgendwann tatsächlich ablehnt (dann greift der Zweig darunter).
+         */
+        if (auftrag.netzfehler && istNetzfehler(roh)) {
+          auftrag.netzfehler()
+          return
+        }
         abweisen(roh)
         auftrag.zurueckdrehen?.()
         vorgemerkt.value = null
@@ -1010,12 +1381,18 @@ export function useZaehlwerk(optionen: {
    * Gebraucht, wenn eine Partie endet: eine Antwort auf einen Punkt, die
    * eine Sekunde nach dem Endergebnis eintrifft, hätte sonst noch eine Zahl
    * auf eine Tafel geschrieben, über die bereits abgerechnet wurde.
+   *
+   * DER MERKPOSTEN GEHT DABEI MIT WEG. Ein Stand, der auf eine Wiederholung
+   * wartet, gehört der Partie, die gerade endet — würde er trotzdem
+   * irgendwann nachgeholt, schriebe er auf ein Ergebnis, über das die
+   * Anwendung schon abgerechnet hat.
    */
   function alleUeberholen() {
     hoechsteAntwort = ++letzteNummer
     vorgemerkt.value = null
     lageVorgemerkt.value = null
     wartenEndet()
+    merkpostenAufraeumen()
   }
 
   /**
@@ -1066,6 +1443,15 @@ export function useZaehlwerk(optionen: {
     const alt = schrittJetzt(vierzehn?.foulart)
 
     /*
+     * EIN NEUER TIPP ERSETZT EINEN ETWA NOCH AUSSTEHENDEN MERKPOSTEN — er
+     * reiht sich nicht dahinter (siehe "DER NETZFEHLER" weiter oben). Der
+     * alte Versuch trägt ohnehin einen überholten Stand; ihn jetzt noch
+     * nachzuholen, könnte den Stand, den DIESER Tipp gleich schickt, später
+     * wieder überschreiben.
+     */
+    merkpostenAufraeumen()
+
+    /*
      * ZUERST DIE ANZEIGE, DANN DAS NETZ — und in dieser Reihenfolge steht
      * die ganze Änderung. Ab hier liest der nächste Tastendruck (`zaehlen`)
      * bereits den neuen Wert, und deshalb ergeben zwei schnelle "+" zwei
@@ -1099,13 +1485,38 @@ export function useZaehlwerk(optionen: {
     }
     if (altMerken) merken(alt)
 
+    const auftrag = standAuftragBauen(m, neu, ruecknahme, vierzehn, () => {
+      if (altMerken) verlauf.value.pop()
+      auchZurueck?.()
+    })
+
     losschicken({
-      was: () => $fetch<{
-        scoreA: number, scoreB: number
-        ballsOnTable?: number | null, foulsA?: number | null, foulsB?: number | null
-        runA?: number | null, highA?: number | null
-        runB?: number | null, highB?: number | null
-      }>(
+      ...auftrag,
+      // Nur der Stand wiederholt sich selbst bei einem Netzfehler — siehe
+      // "NUR DIE PUNKTE" bei `merkposten` weiter oben.
+      netzfehler: () => merkpostenSenden(
+        m.id, auftrag, { art: 'stand', basis: alt.stand, neu, ruecknahme, vierzehn }),
+    })
+  }
+
+  /**
+   * Der Rumpf von `PUT /score` und was mit seiner Antwort geschieht — EINMAL
+   * GEBAUT UND ZWEIMAL GEBRAUCHT: beim ersten Tipp (`setzen`) UND beim
+   * Wiederherstellen eines gespeicherten Merkpostens nach einem Neuladen
+   * (`standWiederherstellen`). Ein Inline-Objekt in `setzen` liesse sich für
+   * den zweiten Fall nicht aufheben, denn dort gibt es kein `setzen`, das es
+   * bauen könnte — nur einen gespeicherten `GespeicherterStand`.
+   *
+   * @param nachZurueckdrehen was NEBEN dem Merkposten noch zurückzunehmen
+   *   ist, wenn dieser Vorgang der jüngste ist und fachlich scheitert — beim
+   *   ersten Tipp der Verlauf, beim Wiederherstellen nichts (siehe dort).
+   */
+  function standAuftragBauen(
+    m: Match, neu: Standpaar, ruecknahme: boolean, vierzehn: Vierzehnfassung | undefined,
+    nachZurueckdrehen: () => void = () => {},
+  ): StandAuftrag {
+    return {
+      was: () => $fetch<StandAntwort>(
         `/api/board/matches/${m.id}/score`,
         {
           method: 'PUT',
@@ -1146,6 +1557,10 @@ export function useZaehlwerk(optionen: {
       // Der Stand der ANTWORT und nicht der geschickte: die Anwendung ist die
       // Stelle, die ihn festhält, und sie darf ihn anders auslegen.
       angekommen: (antwort) => {
+        // Angekommen heisst: ein etwa noch offener Merkposten hat sich
+        // erledigt — gleich, ob es der erste Versuch war oder eine
+        // Wiederholung nach einem Netzausfall.
+        merkpostenAufraeumen()
         gehalten.value = { stand: { A: antwort.scoreA, B: antwort.scoreB }, seit: Date.now() }
         // Dieselbe Regel für die Lage — und nur, wenn die Antwort sie führt.
         // Eine Satzpartie bekommt hier nichts zurück und soll auch nichts
@@ -1169,12 +1584,18 @@ export function useZaehlwerk(optionen: {
        * Vorgänger noch unterwegs war, ist es der richtigere: gezeigt wird,
        * was die Anwendung zuletzt nachweislich führte, und nicht, was das
        * Gerät sich zwischendurch gedacht hat.
+       *
+       * NUR HIER, BEI DER FACHLICHEN ABWEISUNG — nicht beim Netzfehler
+       * (siehe `netzfehler` in `setzen`/`standWiederherstellen`): der wird
+       * gemerkt und wiederholt statt zurückgedreht, und räumt den
+       * Merkposten deshalb nicht hier auf, sondern erst in `angekommen`
+       * oder wenn diese Zeile hier doch noch erreicht wird.
        */
       zurueckdrehen: () => {
-        if (altMerken) verlauf.value.pop()
-        auchZurueck?.()
+        merkpostenAufraeumen()
+        nachZurueckdrehen()
       },
-    })
+    }
   }
 
   /**
@@ -1765,6 +2186,193 @@ export function useZaehlwerk(optionen: {
     })
   }
 
+  /* ----------------------------------------------------------------------
+   * DAS ENDE, WENN ES AN EINEM NETZFEHLER SCHEITERT
+   * ----------------------------------------------------------------------
+   *
+   * Der Auftraggeber, präzisiert am 25.09.2026: "eine Partie ohne WiFi am
+   * Tablet zu Ende spielen können, exkl. Schiri-Eingriffe". Zu Ende SPIELEN
+   * schliesst das ABSCHLIESSEN ein — ohne `beenden`/`aufgeben` bliebe die
+   * Partie auf "läuft" stehen und blockierte den Tisch, und genau das soll
+   * dieser ganze Umbau verhindern.
+   *
+   * DIE BEGRÜNDUNG ÜBER `beenden`, WARUM ES NICHT VORWEGGENOMMEN WIRD (siehe
+   * DRITTENS im Kopf der Datei), BLEIBT UNVERÄNDERT RICHTIG: die Fläche darf
+   * nicht sofort "fertig" behaupten und es eine Sekunde später doch nicht
+   * sein. Sie sagt NICHT, dass ein Netzfehler nicht überbrückt werden dürfe
+   * — sie sagt nur, dass die Anzeige dabei nicht vorgreifen darf. Deshalb
+   * bleiben `beenden` und `aufgeben` ABWARTEND: sie laufen weiter über
+   * `laeuft` und sperren die Leiste, solange ein Versuch — der erste oder
+   * eine Wiederholung — unterwegs ist oder auf seine Wiederholung wartet.
+   *
+   * FACHLICH GENAUSO WIE BEIM STAND: eine Abweisung mit einer Fachkennung
+   * (etwa RACE_NOT_REACHED, weil das Turnierbüro inzwischen selbst
+   * eingegriffen hat) wird gezeigt und NICHT wiederholt. Nur ein Netzfehler
+   * — keine Verbindung, eine Zeitüberschreitung, 502/503/504 — wird gemerkt
+   * (`ergebnis`) und mit denselben wachsenden Abständen erneut versucht wie
+   * ein Stand (`NETZ_WIEDERHOLUNG_MS`, siehe dort für die Begründung gegen
+   * `navigator.onLine`).
+   *
+   * DIE TAFEL SAGT DABEI AUSDRÜCKLICH NICHT "FINISHED". Es gibt hier keinen
+   * Vorgriff — anders als beim Stand ist der ganze Sinn dieser Route, dass
+   * die Anwendung selbst entscheidet, ob die Partie zu Ende ist (siehe
+   * "KEIN RUMPF, UND KEIN SIEGER IM AUFRUF" unten). `ergebnisAusstehend`
+   * ist deshalb nur eine Auskunft — "das Ergebnis liegt hier bereit, die
+   * Anwendung hat es noch nicht gesehen" — und keine Behauptung, dass es
+   * schon gilt.
+   *
+   * EIN GEMERKTES ERGEBNIS ERSETZT EINEN GEMERKTEN STAND, NICHT UMGEKEHRT.
+   * `aufgeben` schickt scoreA/scoreB selbst mit (siehe dort) — ein noch
+   * offener Punkt-Merkposten wäre in dem Moment nur eine überflüssige
+   * zweite Wahrheit über denselben Stand und wird deshalb VOR dem Versuch
+   * aufgeräumt. `beenden` dagegen trägt gar keinen Stand im Aufruf
+   * (`competition.confirm_match_result` liest ihn aus der Datenbank) — ein
+   * zu diesem Zeitpunkt noch offener Punkt-Merkposten bliebe hier unberührt
+   * und liefe unabhängig weiter; das ist der eine Fall, den dieser Umbau
+   * NICHT auflöst (siehe die Meldung am Ende des Auftrags).
+   *
+   * ÜBERSTEHT EBENFALLS EIN NEULADEN — genau wie der Stand (siehe
+   * `GespeicherterMerkposten` am Kopf der Datei): am selben Schlüssel liegt
+   * hier `{ art: 'ende', ... }`, und `merkpostenWiederherstellen` liest ihn
+   * genauso aus wie einen Stand.
+   */
+  let ergebnis: {
+    matchId: string
+    was: () => Promise<{ advanced: number, newlySettled: number }>
+    gespeichert: GespeichertesEnde
+  } | null = null
+  let ergebnisUhr: ReturnType<typeof setTimeout> | null = null
+  let ergebnisVersuch = 0
+
+  /**
+   * Liegt ein Ende bereit, das die Anwendung noch nicht gesehen hat?
+   *
+   * Die Tafel zeigt dafür ausdrücklich NICHT "finished" (siehe oben), aber
+   * auch nicht nichts — sonst stünde die Leiste minutenlang gesperrt, ohne
+   * dass irgendwer sagen könnte, warum.
+   */
+  const ergebnisAusstehend = ref(false)
+
+  function ergebnisAufraeumen() {
+    if (ergebnisUhr) { clearTimeout(ergebnisUhr); ergebnisUhr = null }
+    if (ergebnis) merkpostenGeloescht(ergebnis.matchId)
+    ergebnis = null
+    ergebnisVersuch = 0
+    ergebnisAusstehend.value = false
+  }
+
+  /** Einen Versuch unternehmen — den ersten oder eine Wiederholung. */
+  async function ergebnisVersuchen() {
+    const eintrag = ergebnis
+    if (!eintrag) return
+    try {
+      await eintrag.was()
+      await nachschauen()
+      // Was zu Ende ist, wird nicht mehr zurückgenommen — und ein Verlauf,
+      // der auf eine beendete Partie zeigt, wäre eine Falle.
+      verlauf.value = []
+      gehalten.value = null
+      lageGehalten.value = null
+      alleUeberholen()
+      ergebnisAufraeumen()
+      laeuft.value = false
+    }
+    catch (roh: unknown) {
+      if (istNetzfehler(roh)) {
+        // Erst HIER abgelegt und nicht schon in `beendenSchreiben`: ein
+        // Ende, das beim ersten Versuch sofort durchgeht (der häufigste
+        // Fall, solange das Netz steht), soll gar nicht erst in
+        // `localStorage` stehen — dort gehört nur, was WIRKLICH noch
+        // aussteht.
+        merkpostenSpeichern(eintrag.matchId, eintrag.gespeichert)
+        ergebnisAusstehend.value = true
+        ergebnisWiederholungPlanen()
+        // `laeuft` bleibt WAHR — die Leiste bleibt gesperrt, bis entweder
+        // die Wiederholung durchkommt oder die Anwendung doch noch fachlich
+        // ablehnt. Das ist dieselbe Abwägung wie beim ersten Versuch: eine
+        // Fläche, die zwischendurch wieder "geht", behauptete ein Ende, das
+        // gerade nicht feststeht.
+        return
+      }
+      abweisen(roh)
+      ergebnisAufraeumen()
+      laeuft.value = false
+    }
+  }
+
+  function ergebnisWiederholungPlanen() {
+    if (ergebnisUhr) clearTimeout(ergebnisUhr)
+    const wartezeit = NETZ_WIEDERHOLUNG_MS[
+      Math.min(ergebnisVersuch, NETZ_WIEDERHOLUNG_MS.length - 1)
+    ]!
+    ergebnisUhr = setTimeout(() => {
+      ergebnisUhr = null
+      if (!ergebnis) return
+      ergebnisVersuch++
+      void ergebnisVersuchen()
+    }, wartezeit)
+  }
+
+  /**
+   * Der abwartende Weg für `beenden`/`aufgeben` — dieselbe Sperre wie
+   * `schreiben`, aber mit der Netzwiederholung von oben statt einer
+   * endgültigen Abweisung.
+   */
+  async function beendenSchreiben(
+    matchId: string,
+    was: () => Promise<{ advanced: number, newlySettled: number }>,
+    gespeichert: GespeichertesEnde,
+  ) {
+    if (laeuft.value) return
+    laeuft.value = true
+    melden(null)
+    ergebnis = { matchId, was, gespeichert }
+    await ergebnisVersuchen()
+  }
+
+  /**
+   * Ein gespeichertes Ende nach einem Neuladen wiederherstellen.
+   *
+   * KEIN ABGLEICH BEI `confirm` — der Aufruf trägt keinen Stand, die
+   * Anwendung liest ihn selbst aus der Datenbank (siehe die Begründung vor
+   * `beenden`); es gibt hier nichts, das veralten könnte.
+   *
+   * BEI `result` DERSELBE ABGLEICH WIE BEIM STAND (`standWiederherstellen`):
+   * `basis` ist der Stand, auf dem `rumpf.scoreA`/`scoreB` beruhen. Führt
+   * der Server inzwischen einen anderen, hat sich seit dem Netzausfall
+   * etwas geändert, von dem dieses Gerät nichts weiß — verworfen statt
+   * gesendet, aus demselben Grund. `basis` ist `null` bei WALKOVER: dort
+   * ist der Rumpf immer 0:0, unabhängig vom tatsächlichen Stand, und es
+   * gibt nichts, wogegen sich das abgleichen ließe.
+   */
+  function ergebnisWiederherstellen(matchId: string, gespeichert: GespeichertesEnde) {
+    const m = partie.value
+    if (!m) return
+
+    if (gespeichert.pfad === 'result' && gespeichert.basis) {
+      const aktuell: Standpaar = { A: rohstand(m, 'A'), B: rohstand(m, 'B') }
+      if (aktuell.A !== gespeichert.basis.A || aktuell.B !== gespeichert.basis.B) {
+        merkpostenGeloescht(matchId)
+        return
+      }
+    }
+
+    const was = () => gespeichert.pfad === 'confirm'
+      ? $fetch<{ advanced: number, newlySettled: number }>(
+          `/api/board/matches/${m.id}/confirm`, { method: 'POST', timeout: SENDEFRIST_MS })
+      : $fetch<{ advanced: number, newlySettled: number }>(
+          `/api/board/matches/${m.id}/result`, {
+            method: 'POST', body: gespeichert.rumpf, timeout: SENDEFRIST_MS,
+          })
+
+    // Die Leiste bleibt gesperrt, genau wie beim ersten Versuch vor dem
+    // Neuladen — siehe die Begründung im Kopf dieses Abschnitts.
+    laeuft.value = true
+    ergebnis = { matchId, was, gespeichert }
+    ergebnisAusstehend.value = true
+    ergebnisWiederholungPlanen()
+  }
+
   /**
    * Die Partie ist zu Ende — BESTÄTIGT, nicht gemeldet.
    *
@@ -1790,17 +2398,15 @@ export function useZaehlwerk(optionen: {
   async function beenden() {
     const m = partie.value
     if (!m) return
-    await schreiben(() => $fetch<{ advanced: number, newlySettled: number }>(
-      `/api/board/matches/${m.id}/confirm`, {
-        method: 'POST',
-        timeout: SENDEFRIST_MS,
-      }))
-    // Was zu Ende ist, wird nicht mehr zurückgenommen — und ein Verlauf,
-    // der auf eine beendete Partie zeigt, wäre eine Falle.
-    verlauf.value = []
-    gehalten.value = null
-    lageGehalten.value = null
-    alleUeberholen()
+    await beendenSchreiben(
+      m.id,
+      () => $fetch<{ advanced: number, newlySettled: number }>(
+        `/api/board/matches/${m.id}/confirm`, {
+          method: 'POST',
+          timeout: SENDEFRIST_MS,
+        }),
+      { art: 'ende', pfad: 'confirm', basis: null },
+    )
   }
 
   /**
@@ -1848,22 +2454,38 @@ export function useZaehlwerk(optionen: {
     const walkover = art === 'NO_SHOW'
     const punkte = walkover ? { A: 0, B: 0 } : stand.value
 
-    await schreiben(() => $fetch<{ advanced: number, newlySettled: number }>(
-      `/api/board/matches/${m.id}/result`, {
-        method: 'POST',
-        body: {
-          winner: gegner,
-          scoreA: punkte.A,
-          scoreB: punkte.B,
-          resolution: walkover ? 'WALKOVER' : 'FORFEIT',
-          ...(code === '' ? {} : { boardPin: code }),
-        },
-        timeout: SENDEFRIST_MS,
-      }))
-    verlauf.value = []
-    gehalten.value = null
-    lageGehalten.value = null
-    alleUeberholen()
+    /*
+     * EIN GEMERKTES ERGEBNIS ERSETZT EINEN GEMERKTEN STAND — dieser Aufruf
+     * trägt scoreA/scoreB absolut mit (`punkte`, oben aus `stand.value`
+     * entnommen). Ein noch offener Punkt-Merkposten würde denselben Stand
+     * nur ein zweites Mal und überflüssig hinterherschicken, siehe "DER
+     * NETZFEHLER" bei `setzen` und die Begründung vor `beenden`.
+     */
+    merkpostenAufraeumen()
+
+    const rumpf = {
+      winner: gegner,
+      scoreA: punkte.A,
+      scoreB: punkte.B,
+      resolution: (walkover ? 'WALKOVER' : 'FORFEIT') as 'WALKOVER' | 'FORFEIT',
+      ...(code === '' ? {} : { boardPin: code }),
+    }
+
+    await beendenSchreiben(
+      m.id,
+      () => $fetch<{ advanced: number, newlySettled: number }>(
+        `/api/board/matches/${m.id}/result`, {
+          method: 'POST',
+          body: rumpf,
+          timeout: SENDEFRIST_MS,
+        }),
+      /*
+       * `basis` NUR BEI FORFEIT — bei WALKOVER steht im Rumpf immer 0:0
+       * (siehe oben), unabhängig vom tatsächlichen Stand, und ein Abgleich
+       * dagegen wäre keiner. Siehe `ergebnisWiederherstellen`.
+       */
+      { art: 'ende', pfad: 'result', rumpf, basis: walkover ? null : { ...punkte } },
+    )
   }
 
   /**
@@ -2000,6 +2622,24 @@ export function useZaehlwerk(optionen: {
   return {
     laeuft, fehler, stand, kannZurueck, unbestaetigt,
     /**
+     * Wartet ein Stand auf eine Wiederholung, weil das Netz ausgefallen war?
+     *
+     * ANDERS ALS `unbestaetigt` IST DAS DIE AUSKUNFT FÜR DEN LANGEN AUSFALL
+     * — die Tafel zeigt sie dauerhaft, nicht nur für einen Wimpernschlag.
+     * Siehe die Begründung bei `netzausfall` weiter oben und die Verwendung
+     * in [table].vue.
+     */
+    netzausfall,
+    /**
+     * Liegt ein Ende (`beenden`/`aufgeben`) bereit, das an einem Netzfehler
+     * gescheitert ist und auf seine Wiederholung wartet?
+     *
+     * Die Tafel sagt dabei ausdrücklich NICHT "finished" — siehe die
+     * Begründung vor `beenden` — sondern nur, dass ein Ergebnis hier liegt
+     * und noch hinaus muss.
+     */
+    ergebnisAusstehend,
+    /**
      * Ist Schluss? Die Auskunft, nach der die Leiste ihre Flächen sperrt.
      * Sie kommt von hier und nicht aus [table].vue, damit sie dieselbe Zahl
      * liest, nach der `zubuchbar` deckelt.
@@ -2091,6 +2731,36 @@ export function useAbweisung() {
   onScopeDispose(() => { if (uhr) clearTimeout(uhr) })
 
   return { fehler, melden, abweisen }
+}
+
+/**
+ * IST DIESE ABWEISUNG EIN NETZFEHLER — UND KEINE ABWEISUNG DER ANWENDUNG?
+ *
+ * Die Unterscheidung ist die ganze Grundlage der Netzwiederholung in
+ * `useZaehlwerk` (siehe dort, "DER NETZFEHLER"): ein Netzfehler wird
+ * gemerkt und irgendwann nachgeholt, eine fachliche Abweisung NIE — sie
+ * widerspräche der Anwendung sonst endlos.
+ *
+ * NETZFEHLER SIND:
+ *
+ *   - GAR KEINE ANTWORT (keine Verbindung, DNS, eine Zeitüberschreitung
+ *     durch `timeout: SENDEFRIST_MS`). `alsFehler` erkennt das am fehlenden
+ *     Statuscode (dort: NO_CONNECTION), und genau dieselbe Prüfung wird
+ *     hier wiederverwendet.
+ *   - 502 / 503 / 504. Der Server selbst ist erreichbar — ein
+ *     Vorschalt-Proxy antwortet —, aber DAHINTER ist niemand, der die
+ *     Frage beantworten könnte. Fachlich ist das identisch mit "keine
+ *     Verbindung": die Anwendung hat den Stand nie gesehen.
+ *
+ * ALLES ANDERE MIT EINEM STATUSCODE IST FACHLICH — 400, 401, 403, 409, was
+ * auch immer: die Anwendung hat geantwortet und NEIN gesagt, und ein Nein
+ * wird durch Wiederholen nicht zu einem Ja.
+ */
+function istNetzfehler(roh: unknown): boolean {
+  const antwort = roh as { statusCode?: number, status?: number }
+  const code = antwort?.statusCode ?? antwort?.status
+  if (!code) return true
+  return code === 502 || code === 503 || code === 504
 }
 
 /**
